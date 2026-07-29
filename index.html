@@ -241,6 +241,18 @@
   // このURLは変えない。ここからはリンクするだけで、表示には一切使わない。
   var GAS_EXEC_URL = 'https://script.google.com/macros/s/AKfycbxAOpYw6XwevYwLFEahsEvKJfqkxnACdrtpsWaWSFqWR-ltooiVGfLMBwJe6bABSJN1/exec';
 
+  // 🔴 GASへ飛ぶURLは**必ずこの関数を通す**（2026-07-29・多重ログイン対策）。
+  //    Googleは複数アカウントにログインしているブラウザで、GASのURLを `/macros/u/1/s/…` へ
+  //    書き換える。そのパスは404になり、客には「現在、ファイルを開くことができません」と出る。
+  //    オーナーの実機で再現し、**アカウントを1つにしたら通った**ことで原因が確定している。
+  //    `authuser=0` を明示すると、その書き換えが起きない。カタログは匿名で開ける設定なので
+  //    どのアカウントに当たるかは関係ない。
+  //    ⚠️ **個別に付け足す形にしない。** 付け忘れた1本が、客にとっては行き止まりになる。
+  function gasUrl(query) {
+    var q = String(query || '').replace(/^\?/, '');
+    return GAS_EXEC_URL + '?authuser=0' + (q ? '&' + q : '');
+  }
+
   // 🔴 GAS版と**同じキー**にしてある。中身は共有されない（別ドメインなので別の入れ物）が、
   //    将来どちらかへ寄せるときに形が同じである方が扱いやすい。
   var CART_KEY = 'qrcat_keeps_v1';
@@ -359,7 +371,7 @@
   function landingHtml() {
     return '<div class="detail-panel"><div class="empty-state">' +
       '店内の商品につけられた<strong>QRコード</strong>をカメラで読み取ると、その商品の詳細が表示されます。<br><br>' +
-      '<a class="fav-link" href="' + escapeHtml(GAS_EXEC_URL) + '?view=members">公式LINEの友だち限定カタログを見る</a>' +
+      '<a class="fav-link" href="' + escapeHtml(gasUrl('view=members')) + '">公式LINEの友だち限定カタログを見る</a>' +
       '</div></div>';
   }
 
@@ -403,7 +415,7 @@
     // お気に入りは「誰の」を特定する必要がある＝公式LINEのログインが要るのでGAS側のまま。
     // ここからはリンクするだけ（開けない端末があることは承知のうえ。値段の表示はそれに依存しない）。
     var favHtml =
-      '<a class="fav-btn" href="' + escapeHtml(GAS_EXEC_URL) + '?view=members" target="_blank" rel="noopener">' +
+      '<a class="fav-btn" href="' + escapeHtml(gasUrl('view=members')) + '" target="_blank" rel="noopener">' +
       '☆ お気に入り（公式LINEの会員カタログ）</a>' +
       '<p class="fav-why">お気に入りは<b>公式LINEのアカウントに残ります</b>ので、端末やブラウザが変わっても消えません。' +
       '（この画面ではなく、公式LINEの会員カタログでご利用いただけます）</p>';
@@ -528,7 +540,7 @@
 
   function boot() {
     token = readToken();
-    $('privacy-link').href = GAS_EXEC_URL + '?view=privacy';
+    $('privacy-link').href = gasUrl('view=privacy');
 
     // 🔴 トークンが無い／形が違うときは data.json を待たない。
     //    案内を出すのに商品データは要らないので、**data.json が落ちていても案内は出る**。
