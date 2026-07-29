@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>アンティーク家具たかはし</title>
+<!--
+  QRラベルの中継。公開先: https://qr.antiquekagu-takahashi.com/
+
+  🔴 なぜこの1枚を挟むのか（docs/qr-url-policy.md）
+     印刷したQRのURLは**二度と変えられない**（ラベルは何年も貼りっぱなし）。
+     行き先を直接焼き込むと、その行き先が使えなくなった日にラベルが全部死ぬ。
+     実際、自社ECのドメイン(antique-takahashi.com)はDNSがEC事業者(iFLAG)配下で、
+     **EC契約が切れるとネームサーバーごと止まる**。今の518枚がEC契約と無関係に
+     生きているのは、GAS直リンクだったから。
+
+     → **当社が握るドメインに、行き先を後から変えられる1枚を置く。**
+       ラベルに焼くのはこのURLだけ。裏側（自社EC→将来の別基盤）が変わっても、
+       ここを書き換えれば**印刷済みQRは生き続ける**。
+
+  ⚠️ このページの置き場（GitHub Pages）はいつでも変えてよい。
+     変えてはいけないのは **qr.antiquekagu-takahashi.com というURLの方**。
+     ラベルに焼かれているのはそちらで、置き場は焼かれていない。
+
+  🔴 行き先を変えるときは、このファイルの TARGET だけを直す。
+-->
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    background: #faf7f2; color: #2f2b26; min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px 20px; line-height: 1.9;
+  }
+  .wrap { width: 100%; max-width: 420px; text-align: center; }
+  .spin {
+    width: 36px; height: 36px; margin: 0 auto 22px;
+    border: 3px solid #e3ddd2; border-top-color: #7c6a4f;
+    border-radius: 50%; animation: r .9s linear infinite;
+  }
+  @keyframes r { to { transform: rotate(360deg); } }
+  .t { font-size: 19px; font-weight: 600; margin-bottom: 10px; }
+  .s { font-size: 15px; color: #6b6255; margin-bottom: 26px; }
+  .b {
+    display: block; width: 100%; min-height: 56px; line-height: 56px;
+    background: #7c6a4f; color: #fff; border-radius: 12px;
+    text-decoration: none; font-size: 18px; font-weight: 600;
+  }
+  .ng { font-size: 15px; color: #6b6255; }
+</style>
+</head>
+<body>
+  <div class="wrap" id="wrap">
+    <div class="spin" id="spin"></div>
+    <p class="t" id="t">商品ページをひらいています</p>
+    <p class="s" id="s">切り替わらない場合は、下のボタンをタップしてください。</p>
+    <a class="b" id="go" href="#">つづける</a>
+  </div>
+<script>
+(function () {
+  // 🔴 行き先。ここだけを直せば、印刷済みQRの行き先が変わる。
+  var TARGET = 'https://www.antique-takahashi.com/docs/catalog/';
+
+  // トークンは 32桁の16進（小文字）。admin-app の発番と同じ形式。
+  // 🔴 形が違うものは**行き先へ渡さない**（変な値をそのまま転送しない）。
+  function readToken() {
+    var m = String(window.location.search || '').match(/[?&]t=([0-9a-f]{32})(?:&|$)/i);
+    if (m) return m[1].toLowerCase();
+    // パス形式 /<トークン> にも対応（将来URLを短くしたくなったとき用）
+    var p = String(window.location.pathname || '').match(/\/([0-9a-f]{32})\/?$/i);
+    return p ? p[1].toLowerCase() : '';
+  }
+
+  var t = readToken();
+  var go = document.getElementById('go');
+
+  if (!t) {
+    // 🔴 行き止まりにしない。QRが読めなかった／古い札のときに、何をすればよいか出す。
+    document.getElementById('spin').style.display = 'none';
+    document.getElementById('t').textContent = '商品が特定できませんでした';
+    document.getElementById('s').innerHTML =
+      'QRコードをもう一度読み取ってみてください。<br>うまくいかないときは、店頭スタッフにお声がけください。';
+    go.style.display = 'none';
+    return;
+  }
+
+  var url = TARGET + '?t=' + t;
+  go.href = url;                     // 🔴 自動遷移より先にリンクを入れる（止まっても押せる）
+  try { window.location.replace(url); } catch (e) { /* ボタンで進んでもらう */ }
+})();
+</script>
+</body>
+</html>
