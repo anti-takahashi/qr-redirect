@@ -1,0 +1,4 @@
+# 検索エンジンに載せる場所ではない。店内でQRを読んだ人が開く画面と、店の作業ページだけ。
+# 🔴 各HTMLの <meta name="robots"> はHTMLにしか効かない。data.json を止められるのはここだけ。
+User-agent: *
+Disallow: /
