@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ログインしています｜アンティーク家具たかはし</title>
+<!--
+  公式LINEログインの戻り先（中継ページ）。
+  公開先: https://www.antique-takahashi.com/docs/line/cb.html
+
+  🔴 なぜ自社ドメインを挟むのか（2026-07-29・実機で判明）
+     LINEの戻り先をGASのURL（script.google.com）にしていたところ、
+     **Googleにログインしているブラウザでは `/macros/u/1/s/...` へ書き換えられ**、
+     そのパスは404になって「現在、ファイルを開くことができません」になった。
+     オーナーの実機で再現し、**プライベートブラウズでは通る**ことで確定した
+     （プライベートにはGoogleのログイン状態が引き継がれないため）。
+     カタログ自体は匿名で開ける設定（実測：匿名アクセスで本体が返る）なので、
+     問題はカタログではなく**戻り先がGoogleドメインであること**。
+     → 戻り先をこのページにして、Googleのアカウント判定を通らないようにする。
+
+  🔴 このページがやること・やらないこと
+     やる   : LINEから渡された値のうち**決まったものだけ**を、決まった1つのURLへ渡す。
+     やらない: 任意のURLへの転送（オープンリダイレクトを作らない）。
+              値の中身の検証（それはサーバ側の仕事。ここは運ぶだけ）。
+              外部への通信・スクリプト読み込み（このファイル1枚で完結する）。
+-->
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    background: #faf7f2; color: #2f2b26; min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px 20px; line-height: 1.9;
+  }
+  .wrap { width: 100%; max-width: 420px; text-align: center; }
+  .spin {
+    width: 36px; height: 36px; margin: 0 auto 22px;
+    border: 3px solid #e3ddd2; border-top-color: #7c6a4f;
+    border-radius: 50%; animation: r .9s linear infinite;
+  }
+  @keyframes r { to { transform: rotate(360deg); } }
+  .t { font-size: 19px; font-weight: 600; margin-bottom: 10px; }
+  .s { font-size: 15px; color: #6b6255; margin-bottom: 26px; }
+  .b {
+    display: block; width: 100%; min-height: 56px; line-height: 56px;
+    background: #7c6a4f; color: #fff; border-radius: 12px;
+    text-decoration: none; font-size: 18px; font-weight: 600;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="spin"></div>
+    <p class="t">ログインしています</p>
+    <p class="s">切り替わらない場合は、下のボタンをタップしてください。</p>
+    <!-- 🔴 自動遷移がブロックされたときの逃げ道。**最初から見せる**。
+         「数秒後に出す」にすると、出ないときに何も分からないまま待たせることになる。 -->
+    <a class="b" id="go" href="#">つづける</a>
+  </div>
+<script>
+(function () {
+  // 🔴 行き先は**この1つだけ**。URLパラメータから組み立てない（オープンリダイレクトを作らない）。
+  //    印刷済みQR518枚が指すのと同じ固定デプロイ。ここを変えるときは
+  //    catalog-app の CATALOG_EXEC_URL_ と LINE開発者サイトの設定も必ず揃える。
+  var TARGET = 'https://script.google.com/macros/s/AKfycbxAOpYw6XwevYwLFEahsEvKJfqkxnACdrtpsWaWSFqWR-ltooiVGfLMBwJe6bABSJN1/exec';
+
+  // 🔴 渡すのはこの5つだけ。知らない名前は落とす（余計なものを運ばない）。
+  var ALLOW = ['code', 'state', 'error', 'errorCode', 'errorMessage'];
+
+  // 🔴 authuser=0 を明示する（2026-07-29・多重ログイン対策）。
+  //    Googleは複数アカウントにログインしているブラウザで、GASのURLを
+  //    `/macros/u/1/s/…` へ書き換える。そのパスは404になる（実測）。
+  //    authuser で「どのアカウントで開くか」を指定すると、その書き換えを起こさせない。
+  //    カタログは匿名で開ける設定（実測）なので、アカウントの当たり外れは関係ない。
+  var out = ['action=lineLoginCallback', 'authuser=0'];
+  try {
+    var q = window.location.search.replace(/^\?/, '').split('&');
+    for (var i = 0; i < q.length; i++) {
+      var eq = q[i].indexOf('=');
+      if (eq === -1) continue;
+      var k = decodeURIComponent(q[i].slice(0, eq));
+      if (ALLOW.indexOf(k) === -1) continue;
+      // 値は decode せずそのまま運ぶ（二重デコードで壊さない）
+      out.push(encodeURIComponent(k) + '=' + q[i].slice(eq + 1));
+    }
+  } catch (e) { /* 読めなくても行き先は出す＝行き止まりにしない */ }
+
+  var url = TARGET + '?' + out.join('&');
+  var go = document.getElementById('go');
+  if (go) go.href = url;           // 🔴 自動遷移より先にリンクを入れる（遷移が止まっても押せる）
+  try { window.location.replace(url); } catch (e) { /* ボタンで進んでもらう */ }
+})();
+</script>
+</body>
+</html>

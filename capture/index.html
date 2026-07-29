@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<!--
+  ターンテーブル撮影ページ（QR商品管理システム・第1段階／2026-07-18）
+  ============================================================
+  独立した静的ページ（GASの外＝getUserMedia可の要）。GAS(admin-app)の管理画面から
+  masterId・token（短命署名トークン）・apiUrl（GAS webアプリのexec URL）をURLクエリで受け取り、
+  ターンテーブルで回している商品をカメラで自動連写→クライアント側で整形→GASの候補口へ1枚ずつ
+  順次アップロードする。確定（カタログ公開）は行わない＝候補フォルダに置くだけ（設計書§3-1, §5）。
+
+  設計原本: D:\ClaudCode\qr_inventory\docs\ターンテーブル撮影_設計.md
+  デプロイ先（オーナー作業・本Claudeセッションでは実施しない）:
+    FTPで /docs/capture/ へこのファイル一式をアップロードし、
+    https://www.antique-takahashi.com/docs/capture/index.html でアクセスできるようにする。
+    アップロード後、GASのスクリプトプロパティ TURNTABLE_CAPTURE_URL にこのURLを設定する。
+
+  特定アプリのURLスキームには依存しない（getUserMediaのみで完結）。
+-->
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>ターンテーブル撮影 - アンティーク家具たかはし</title>
+<style>
+  :root {
+    --ink: #2f2b26; --sub: #6b6255; --line: #e3ddd2; --panel: #fff; --panel-2: #faf7f2;
+    --accent: #7c6a4f; --accent-dark: #5c4d38; --accent-soft: #efe8da;
+    --danger: #a5453a; --ok: #4c7a4f; --radius: 14px; --shadow: 0 2px 10px rgba(60,50,30,.08);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+    background: var(--panel-2); color: var(--ink); padding: 14px;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  }
+  h1 { font-size: 15px; margin: 0 0 2px; }
+  .hint { font-size: 12px; color: var(--sub); margin: 4px 0 10px; line-height: 1.5; }
+  .hint-compact { font-size: 11px; color: var(--sub); margin: 4px 0 8px; line-height: 1.4; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 14px; margin-bottom: 12px;
+  }
+  /* プレビュー高さを抑え、開始/停止ボタンまでスクロールなしで届くようにする（iPhone実機指摘対応・2026-07-18） */
+  video { width: 100%; border-radius: 10px; background: #111; display: block; max-height: 40vh; object-fit: contain; }
+  .row { display: flex; gap: 8px; margin-top: 10px; }
+  button {
+    font-family: inherit; font-size: 14px; padding: 12px 14px; border-radius: 10px; border: none;
+    cursor: pointer; min-height: 46px;
+  }
+  .primary { background: var(--accent); color: #fff; flex: 1; }
+  .primary:disabled { background: #c9bfa9; }
+  .secondary { background: var(--accent-soft); color: var(--accent-dark); flex: 1; }
+  .danger { background: var(--danger); color: #fff; }
+  .seg { display: flex; gap: 6px; margin-bottom: 8px; }
+  .seg button { flex: 1; background: var(--panel-2); border: 1px solid var(--line); color: var(--ink); min-height: 40px; padding: 8px; font-size: 13px; }
+  .seg button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .status-line { font-size: 13px; margin: 4px 0; }
+  /* 撮影/アップロード枚数を大きく見せる枠（開始ボタン直下・オーナー指摘対応2026-07-18） */
+  .count-box { background: var(--accent-soft); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 12px 0 6px; }
+  .count-line { font-size: 17px; font-weight: 700; margin: 3px 0; }
+  .status-ok { color: var(--ok); }
+  .status-err { color: var(--danger); }
+  .progress-wrap { background: var(--accent-soft); border-radius: 8px; height: 8px; overflow: hidden; margin-top: 8px; }
+  .progress-bar { background: var(--accent); height: 100%; width: 0%; transition: width .2s; }
+  #err-box { display: none; }
+  /* 大型ステータスバー：画面上部にsticky固定表示（下部だと見づらいというオーナー指摘対応・2026-07-18） */
+  .status-big-bar {
+    display: none; position: sticky; top: 0; z-index: 80;
+    margin: -14px -14px 12px; padding: 10px 14px; font-size: 14px; font-weight: 700;
+    text-align: center; line-height: 1.5; box-shadow: 0 2px 8px rgba(0,0,0,.15);
+  }
+  .status-big-bar.pending { background: #fff3cd; color: #7a5b00; border-bottom: 2px solid #f0d98c; }
+  .status-big-bar.complete { background: #e6f2e6; color: var(--ok); border-bottom: 2px solid #b9d8b9; }
+  /* 離脱確認モーダル（戻るボタン・スワイプバック捕捉時に表示。beforeunloadより優先度の高い自前UI） */
+  .leave-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(30, 25, 15, .55);
+    z-index: 200; align-items: center; justify-content: center; padding: 20px;
+  }
+  .leave-modal {
+    background: #fff; border-radius: 14px; padding: 20px; max-width: 360px; width: 100%;
+    box-shadow: 0 8px 30px rgba(0,0,0,.35);
+  }
+  .leave-modal-text { font-size: 15px; font-weight: 700; line-height: 1.7; margin: 0 0 16px; color: var(--ink); }
+  .leave-modal-actions { display: flex; flex-direction: column; gap: 8px; }
+  .leave-modal-actions button { width: 100%; margin: 0; }
+  .leave-modal-actions .leave-stay { background: var(--accent); color: #fff; font-size: 16px; }
+  .leave-modal-actions .leave-go { background: var(--panel-2); color: var(--danger); border: 1px solid var(--line); }
+  /* 開始/停止を画面下部に固定表示（スクロールなしで届くように・iPhone実機指摘対応・2026-07-18） */
+  .footer-bar {
+    display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 90;
+    background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -2px 10px rgba(60,50,30,.12);
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+  .footer-bar .row { margin: 0; }
+</style>
+</head>
+<body>
+  <p id="status-big" class="status-big-bar"></p>
+  <h1>🔄 ターンテーブル撮影</h1>
+  <p class="hint" id="master-id-line">商品: 読み込み中…</p>
+
+  <div id="err-box" class="card">
+    <p class="status-line status-err" id="err-text"></p>
+  </div>
+
+  <div class="card" id="main-card" style="display:none;">
+    <video id="preview" autoplay playsinline muted></video>
+    <canvas id="snap-canvas" style="display:none;"></canvas>
+
+    <div class="seg" style="margin-top:12px;">
+      <button type="button" id="btn-interval-1" onclick="setInterval_(1000)">1秒間隔</button>
+      <button type="button" id="btn-interval-3" onclick="setInterval_(3000)">3秒間隔</button>
+    </div>
+    <!-- 開始/停止：間隔ボタン直下の通常配置（fixed固定はiOS Safariの下部ツールバー裏に隠れるため廃止・2026-07-18） -->
+    <div class="row" style="margin-top:10px;">
+      <button type="button" class="primary" id="btn-start" onclick="startCapture()">● 開始（自動連写）</button>
+      <button type="button" class="danger" id="btn-stop" onclick="stopCapture()" disabled>■ 停止</button>
+    </div>
+    <!-- 撮影/アップロード枚数を開始ボタン直下の目立つ枠に大きく表示（オーナー指摘・2026-07-18） -->
+    <div class="count-box">
+      <p class="count-line" id="status-shot">撮影: 0枚</p>
+      <p class="count-line status-ok" id="status-uploaded">アップロード済み: 0枚</p>
+      <p class="count-line status-err" id="status-failed" style="display:none;">失敗: 0枚</p>
+      <div class="progress-wrap"><div class="progress-bar" id="progress-bar"></div></div>
+    </div>
+    <p class="status-line status-ok" id="autostop-note" style="display:none; font-weight:700; line-height:1.5;"></p>
+    <p class="hint-compact"><b>①商品の正面をカメラに向けて「開始」</b>（最初の1枚＝正面写真として商品登録に使われます）→<b>②回転スタート</b>（回すときに手が映っても大丈夫＝後の選定で除外）→<b>③1周ぶんで自動停止</b>。そのあと管理画面に戻って接写1〜3枚。正面以外の出品用写真は、説明文を作るときにClaudeが候補から選びます。</p>
+
+    <div class="row">
+      <button type="button" class="secondary" onclick="captureCloseup()">📷 接写を1枚追加（上面・底面・銘・傷など）</button>
+    </div>
+    <p class="hint-compact">⚠️ このページのカメラは接写のピント・ズームが弱いです。接写は<b>管理画面の「追加で接写を撮る（OSカメラ）」</b>（1周撮影後に管理画面へ戻って使えます）の方がきれいに撮れます。このボタンは急ぎの1枚だけに。</p>
+
+    <div class="row" style="margin-top:14px;">
+      <button type="button" class="secondary" id="btn-retry" onclick="retryFailed_()" style="display:none;">失敗分を再送</button>
+    </div>
+  </div>
+
+  <div class="card" id="done-card" style="display:none;">
+    <p class="status-line status-ok">✓ アップロード完了です。正面写真は商品登録に自動で使われます。管理画面（元のタブ）に戻り、必要なら「追加で接写を撮る（OSカメラ）」で接写を1〜3枚撮ってください。残りの写真は説明文を作るときにClaudeが選びます。</p>
+    <p class="hint">上面・底面・銘・傷などの接写が必要な場合は、このページではなく<b>管理画面の「追加で接写を撮る（OSカメラ）」</b>で撮ってください（このページのカメラより接写のピントが合いやすいです）。撮った接写も同じ「撮影候補を確認・確定」画面にターンテーブル写真と一緒に出てきます。</p>
+    <button type="button" class="primary" onclick="closeOrGuide_()">このタブを閉じる</button>
+  </div>
+
+  <!-- 離脱確認モーダル（戻る/スワイプバック捕捉時、beforeunloadが効かないiOS Safari向けの主経路） -->
+  <div class="leave-overlay" id="leave-confirm-overlay">
+    <div class="leave-modal">
+      <p class="leave-modal-text" id="leave-confirm-text">⚠️ アップロードが未完了です。このまま離れると、まだ送信できていない写真が失われます。</p>
+      <div class="leave-modal-actions">
+        <button type="button" class="leave-stay" id="leave-confirm-stay-btn" onclick="leaveConfirmStay_()">留まる（推奨）</button>
+        <button type="button" class="leave-go" onclick="leaveConfirmLeave_()">離れる</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---- URLクエリ取得 ----
+  var qs = new URLSearchParams(location.search);
+  var masterId = qs.get('masterId') || '';
+  var token = qs.get('token') || '';
+  var apiUrl = qs.get('apiUrl') || '';
+
+  function showErr(msg) {
+    document.getElementById('err-box').style.display = '';
+    document.getElementById('err-text').textContent = msg;
+  }
+
+  if (!masterId || !token || !apiUrl) {
+    showErr('必要な情報（商品ID・トークン・接続先）が不足しています。管理画面の「ターンテーブルで1周」から開き直してください。');
+    return;
+  }
+  document.getElementById('master-id-line').textContent = '商品: ' + masterId;
+  document.getElementById('main-card').style.display = '';
+
+  // ---- 撮影パラメータ ----
+  var intervalMs = 1000;
+  var UPLOAD_MAX_PX = 2400, UPLOAD_JPEG_Q = 0.82;
+  // 1周ぶん撮ったら自動停止する枚数（ターンテーブル30秒/1周：1秒間隔≒30枚・3秒間隔≒10枚。1.1〜1.2周ぶんの余裕）
+  var maxTurntableShots = 36;
+  var runShots = 0; // 今回の「開始〜停止」で撮ったターンテーブル枚数（自動停止判定用。累積のturntableSeqとは別）
+
+  // 🔴【2026-07-26・出品フロー監査】この関数だけ window へ出していなかった。
+  //    スクリプト全体がIIFEで囲まれているため、HTMLの onclick から呼べず
+  //    **1秒/3秒の切替ボタンが押しても何も起きない**（エラーはコンソールにしか出ない）。
+  //    他の onclick（startCapture/stopCapture/captureCloseup/closeOrGuide_ 等）は
+  //    window へ出してあり、これだけが漏れていた。
+  //    ⚠️ 反映にはFTPで /docs/capture/ へ上げ直す必要がある（人間操作・TLS1.2固定）。
+  window.setInterval_ = function (ms) { setInterval_(ms); };
+
+  function setInterval_(ms) {
+    intervalMs = ms;
+    maxTurntableShots = (ms === 3000) ? 13 : 36; // 3秒≒10枚/1周→13、1秒≒30枚/1周→36
+    document.getElementById('btn-interval-1').className = (ms === 1000) ? 'active' : '';
+    document.getElementById('btn-interval-3').className = (ms === 3000) ? 'active' : '';
+    if (capturing) { stopTimer_(); startTimer_(); } // 撮影中の切替にも対応
+  }
+  // 【2026-07-19・既定を3秒へ変更】アップロードは実測 約8秒/枚。1秒間隔(36枚)だと1商品あたり約5分の
+  // アップロード待ちが発生し、1日30点なら約2.5時間を費やす。3秒間隔(13枚)なら約1.7分/商品＝約50分に短縮。
+  // 1周は30秒なので3秒間隔でも約10枚＝全周をカバーでき、実際に採用するのは6枚程度（T-00442実績）。
+  // 形が複雑で角度を細かく見せたい品だけ、その場で「1秒間隔」に切り替える運用。
+  setInterval_(3000);
+
+  // ---- カメラ起動 ----
+  var stream = null, videoEl = document.getElementById('preview');
+  function initCamera() {
+    var constraints = {
+      audio: false,
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 3840 }, height: { ideal: 2160 } // iPhone 15 Proは4K対応。非対応機はidealで自動フォールバック
+      }
+    };
+    return navigator.mediaDevices.getUserMedia(constraints).then(function (s) {
+      stream = s;
+      videoEl.srcObject = s;
+      // AE/AFロック・1倍固定はブラウザ・端末が対応している範囲でのみ効く（未対応でもエラーにしない＝設計書§3-1）
+      try {
+        var track = s.getVideoTracks()[0];
+        var caps = track.getCapabilities ? track.getCapabilities() : {};
+        var advanced = [];
+        if (caps.zoom) advanced.push({ zoom: Math.max(caps.zoom.min || 1, Math.min(1, caps.zoom.max || 1)) });
+        if (caps.focusMode && caps.focusMode.indexOf('continuous') !== -1) advanced.push({ focusMode: 'continuous' });
+        if (caps.exposureMode && caps.exposureMode.indexOf('continuous') !== -1) advanced.push({ exposureMode: 'continuous' });
+        if (advanced.length) track.applyConstraints({ advanced: advanced }).catch(function () {});
+      } catch (e) { /* 非対応環境は無視して続行 */ }
+    }).catch(function (err) {
+      showErr('カメラを起動できませんでした（' + (err && err.message ? err.message : err) + '）。Safariの設定でカメラ許可を確認してください。');
+    });
+  }
+  initCamera();
+
+  // ---- 連写・キャプチャ ----
+  var capturing = false, timerId = null;
+  var turntableSeq = 0, closeupSeq = 0, frontSeq = 0;
+  var frontTaken = false; // 【2026-07-24フロー確定】開始直後の1枚目＝正面(front)。商品登録に使われる1枚。
+  var shotCount = 0;
+  var uploadQueue = []; // {captureType, seq, filename, dataUrl, mime, attempts}
+  var uploadedCount = 0, failedCount = 0, uploading = false;
+
+  function grabFrame_() {
+    var canvas = document.getElementById('snap-canvas');
+    var w = videoEl.videoWidth, h = videoEl.videoHeight;
+    if (!w || !h) return null;
+    var scale = Math.min(1, UPLOAD_MAX_PX / Math.max(w, h));
+    var cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
+    canvas.width = cw; canvas.height = ch;
+    var ctx = canvas.getContext('2d');
+    ctx.drawImage(videoEl, 0, 0, cw, ch);
+    // canvas.toDataURL('image/jpeg')は再エンコードなのでEXIF(位置情報等)は一切含まれない（＝GPS除去済み）
+    return canvas.toDataURL('image/jpeg', UPLOAD_JPEG_Q);
+  }
+
+  function enqueueShot_(captureType) {
+    var dataUrl = grabFrame_();
+    if (!dataUrl) return false;
+    var seq = (captureType === 'closeup') ? (closeupSeq++)
+      : (captureType === 'front') ? (frontSeq++)
+      : (turntableSeq++);
+    shotCount++;
+    uploadQueue.push({ captureType: captureType, seq: seq, filename: captureType + '_' + seq + '.jpg', dataUrl: dataUrl, mime: 'image/jpeg', attempts: 0 });
+    pushHistoryGuard_(); // 最初のキュー投入時点で一度だけ「戻る」捕捉用の履歴を積む
+    updateStatus_();
+    processQueue_();
+    return true;
+  }
+
+  function startTimer_() {
+    timerId = setInterval(function () {
+      enqueueShot_('turntable');
+      runShots++;
+      if (runShots >= maxTurntableShots) { autoStopCapture_(); } // 1周ぶんで自動停止
+    }, intervalMs);
+  }
+  function stopTimer_() {
+    if (timerId) { clearInterval(timerId); timerId = null; }
+  }
+  function autoStopCapture_() {
+    if (!capturing) return;
+    window.stopCapture();
+    var note = document.getElementById('autostop-note');
+    if (note) {
+      note.style.display = '';
+      note.textContent = '✅ 1周ぶん（' + runShots + '枚）撮影したので自動停止しました。もっと撮るなら再度「開始」を押してください。';
+    }
+  }
+
+  window.startCapture = function () {
+    capturing = true;
+    runShots = 0;
+    var note = document.getElementById('autostop-note');
+    if (note) { note.style.display = 'none'; }
+    document.getElementById('btn-start').disabled = true;
+    document.getElementById('btn-stop').disabled = false;
+    // 開始直後の1枚＝正面(front)。オーナー確定フロー: 正面を向けて開始→この1枚が商品登録の写真になる
+    // →そのあと回転スタート。2回目以降の「開始」ではfrontは撮り直さない（撮り直したい時はページを開き直す）。
+    if (!frontTaken) { frontTaken = enqueueShot_('front'); }
+    else { enqueueShot_('turntable'); }
+    runShots++;
+    startTimer_();
+  };
+  window.stopCapture = function () {
+    capturing = false;
+    stopTimer_();
+    document.getElementById('btn-start').disabled = false;
+    document.getElementById('btn-stop').disabled = true;
+    maybeShowDone_();
+  };
+  window.captureCloseup = function () { enqueueShot_('closeup'); };
+
+  // ---- アップロード（並列/一括不可＝1枚ずつ順次。失敗はリトライ。設計書§3-1） ----
+  var MAX_ATTEMPTS = 4;
+
+  function processQueue_() {
+    if (uploading) return;
+    var next = uploadQueue.find(function (it) { return !it.done && it.attempts < MAX_ATTEMPTS; });
+    if (!next) return;
+    uploading = true;
+    next.attempts++;
+    var body = JSON.stringify({
+      action: 'uploadCaptureCandidate',
+      data: {
+        masterId: masterId, token: token, filename: next.filename,
+        base64Data: next.dataUrl, mimeType: next.mime,
+        captureType: next.captureType, seq: next.seq
+      }
+    });
+    fetch(apiUrl, { method: 'POST', mode: 'cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        uploading = false;
+        if (res && res.ok) {
+          next.done = true;
+          uploadedCount++;
+        } else {
+          handleUploadFailure_(next, res && res.error ? res.error : '不明なエラー');
+        }
+        updateStatus_();
+        processQueue_();
+      })
+      .catch(function (err) {
+        uploading = false;
+        handleUploadFailure_(next, err && err.message ? err.message : String(err));
+        updateStatus_();
+        processQueue_();
+      });
+  }
+
+  function handleUploadFailure_(item, msg) {
+    if (item.attempts >= MAX_ATTEMPTS) {
+      item.failed = true;
+      failedCount++;
+      console.warn('アップロード失敗（上限到達）: ' + item.filename + ' / ' + msg);
+    } else {
+      // 少し待ってから自動リトライ（指数的に間隔を伸ばす）
+      setTimeout(function () { processQueue_(); }, 800 * item.attempts);
+    }
+  }
+
+  window.retryFailed_ = function () {
+    uploadQueue.forEach(function (it) {
+      if (it.failed) { it.failed = false; it.attempts = 0; failedCount--; }
+    });
+    updateStatus_();
+    processQueue_();
+  };
+
+  // 未完了（未アップロード・未失敗確定）件数。beforeunload・大きい表示の両方で使う共通判定。
+  function pendingUploadCount_() {
+    return uploadQueue.filter(function (it) { return !it.done && !it.failed; }).length;
+  }
+
+  function updateStatus_() {
+    document.getElementById('status-shot').textContent = '撮影: ' + shotCount + '枚';
+    document.getElementById('status-uploaded').textContent = 'アップロード済み: ' + uploadedCount + '枚';
+    var failEl = document.getElementById('status-failed');
+    var retryBtn = document.getElementById('btn-retry');
+    if (failedCount > 0) {
+      failEl.style.display = '';
+      failEl.textContent = '失敗: ' + failedCount + '枚（アップロード上限まで自動再試行済み）';
+      retryBtn.style.display = '';
+    } else {
+      failEl.style.display = 'none';
+      retryBtn.style.display = 'none';
+    }
+    var pct = shotCount ? Math.round((uploadedCount / shotCount) * 100) : 0;
+    document.getElementById('progress-bar').style.width = pct + '%';
+
+    var bigEl = document.getElementById('status-big');
+    var pending = pendingUploadCount_();
+    if (shotCount === 0) {
+      bigEl.style.display = 'none';
+    } else if (pending > 0 || uploading) {
+      bigEl.style.display = '';
+      bigEl.className = 'status-big-bar pending';
+      bigEl.textContent = '⏳ アップロード中… 完了までこのページを閉じないでください（残り' + pending + '枚）';
+    } else if (failedCount > 0) {
+      // 失敗が残る間は「完了」と表示しない＝撮影漏れ見逃し防止（Codexレビュー2026-07-18）。
+      bigEl.style.display = '';
+      bigEl.className = 'status-big-bar pending';
+      bigEl.textContent = '⚠️ 失敗' + failedCount + '枚。まだ全ては送信できていません（' + uploadedCount + '/' + shotCount + '枚）。「失敗分を再送」を押してください';
+    } else {
+      bigEl.style.display = '';
+      bigEl.className = 'status-big-bar complete';
+      bigEl.textContent = '✅ 全てアップロード完了。管理画面に戻って「撮影候補を確認・確定」してください';
+    }
+    maybeShowDone_();
+  }
+
+  function maybeShowDone_() {
+    // 失敗が1件でもある間は「完了」カードを出さない（撮影漏れ見逃し防止・Codexレビュー2026-07-18）。
+    if (!capturing && shotCount > 0 && failedCount === 0 && uploadedCount >= shotCount) {
+      document.getElementById('done-card').style.display = '';
+    }
+  }
+
+  window.closeOrGuide_ = function () {
+    window.close();
+    setTimeout(function () {
+      // window.close()が効かないブラウザ向けの案内（script以外で開いたタブ等）
+      document.getElementById('done-card').innerHTML =
+        '<p class="status-line status-ok">✓ アップロード完了です。手動でこのタブを閉じ、管理画面に戻ってください。</p>';
+    }, 400);
+  };
+
+  // ---- 離脱ガード（History API・戻るボタン/スワイプバック捕捉） ----
+  // iOS Safariはbeforeunloadの確認ダイアログが効かないことが多いため、こちらを主経路にする。
+  // 撮影開始 or 最初のアップロードがキューに入った時点（enqueueShot_内）で一度だけ履歴を1つ積んでおき、
+  // 「戻る」操作(popstate)を検知したら、未完了なら即座に同じ状態を積み直して戻りを打ち消し、
+  // 自前の確認モーダルを表示する。「留まる」なら何もしない（積み直し済みでそのまま）。
+  // 「離れる」ならこのタブを閉じる（新規タブで開いている前提。閉じられない場合は案内文言に切替）。
+  var historyGuardPushed = false;
+  var leaveConfirmed = false;
+
+  function pushHistoryGuard_() {
+    if (historyGuardPushed) return;
+    try {
+      history.pushState({ captureGuard: true }, '', location.href);
+      historyGuardPushed = true;
+    } catch (e) { /* History API非対応環境は諦める（beforeunloadのみでカバー） */ }
+  }
+
+  window.addEventListener('popstate', function () {
+    if (leaveConfirmed) return; // 「離れる」確定後の実際の遷移はそのまま通す
+    if (pendingUploadCount_() > 0 || uploading || capturing) {
+      try { history.pushState({ captureGuard: true }, '', location.href); } catch (e) {} // 戻りを打ち消す
+      showLeaveConfirm_();
+    }
+  });
+
+  function showLeaveConfirm_() {
+    var pending = pendingUploadCount_();
+    document.getElementById('leave-confirm-text').textContent =
+      '⚠️ アップロードが未完了です（残り' + pending + '枚）。このまま離れると、まだ送信できていない写真が失われます。';
+    document.getElementById('leave-confirm-overlay').style.display = 'flex';
+  }
+
+  window.leaveConfirmStay_ = function () {
+    document.getElementById('leave-confirm-overlay').style.display = 'none';
+    // ガードは popstate ハンドラで既に積み直し済みなのでここでは何もしない
+  };
+
+  window.leaveConfirmLeave_ = function () {
+    leaveConfirmed = true;
+    document.getElementById('leave-confirm-overlay').style.display = 'none';
+    // このページは新規タブで開かれる前提（設計書§3-1）なので、離脱＝タブを閉じるとして扱う
+    closeOrGuide_();
+  };
+
+  // ページを閉じる/リロードする前の最終防波堤（PC等、popstateが発生しない離脱経路のフォールバック）。
+  // iOS Safariでは確認ダイアログ自体が抑制され効かないことが多いが、消さずに残す（④）。
+  window.addEventListener('beforeunload', function (e) {
+    if (capturing || uploading || pendingUploadCount_() > 0) {
+      var msg = 'アップロードが完了していません。閉じると未アップロードの写真が失われます。';
+      e.preventDefault();
+      e.returnValue = msg;
+      return msg;
+    }
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1568 @@
+<!DOCTYPE html>
+<!--
+  かんたん新規登録 撮影版（QR商品管理システム／2026-07-23 ライブ読み取り撤去）
+  ============================================================
+  独立した静的ページ。GAS(admin-app)の「かんたん新規登録」から token（短命セッショントークン・
+  サーバ保存つき・有効期限30分・登録50件/写真100枚上限）と api（GAS webアプリのexec URL）を
+  URLクエリで受け取り、「QRを撮影」（OSカメラ・capture）→静止画から解読→写真1枚→価格(任意)→
+  保管場所→「登録して次へ」→撮影待受へ即復帰、の連続登録ループを回す。
+
+  【2026-07-23 オーナー実機判断】ライブ「読み取り」（走査線つきの連続スキャン・カメラ切り替えUI）は
+  撤去した。「直接カメラで、ライブはなくしましょう。撮影のがはやいです」。
+  既定の撮影は <input type="file" capture="environment"> でOS標準カメラを起動する方式のまま
+  （Galaxy A7で正常・速い）。
+
+  【2026-07-23 追記・ページ内カメラ方式を追加（getUserMediaの限定復活）】
+  いつ: 2026-07-23（同日夕・オーナー実機検証の結果を受けて）。
+  なぜ: オーナーのOppo端末で「カメラは開く→撮影する→ページに写真が返ってこない」
+        （changeが発火せず「読み取り中」すら出ない）が再現。原因はカメラアプリが前面にいる間に
+        Androidがブラウザ／カメラ側を終了させること。写真が届く前に失われるため、
+        ページ側のJavaScriptでは防げない（メモリ最適化を実施しても解決しなかった）。
+  どの端末のために: 上記Oppoのようにアプリ切替でページ／カメラが落ちる端末。
+  どうしたか: ページ内でカメラ映像を表示してその場で撮る方式（getUserMedia）を"追加"した。
+        アプリを切り替えないので、この問題が構造的に起きない。本ページは自社ドメイン配信
+        （GASのiframeではない）ため getUserMedia が使える。
+  重要: OSカメラ方式は消していない＝既定のまま。撮影方式の選択は端末ごとに localStorage
+        （キー quickreg_cam_mode）へ保存し、待受下部の「ページ内カメラで撮る／OSカメラに戻す」で
+        いつでも往復できる。getUserMediaを呼ぶのは本ページだけ（GAS admin-app側は従来どおり不使用）。
+        カメラは撮影完了・画面離脱・非表示（visibilitychange）で必ず track.stop() する。
+
+  【2026-07-23 追加・オーナー実機指摘「この画面無駄なので直接カメラに」】
+  - ページ読込直後のカメラ自動起動はブラウザ仕様で不可能（ユーザー操作なしのshowPicker()は
+    NotAllowedError・click()は無音で無視。ヘッドレスChromeで実測確認済み）。
+  - そのため 1件目＝待受画面全体をひとつの巨大撮影ボタンにして1タップ。
+  - 2件目以降＝「登録して次へ」タップの操作文脈（実測約5秒持続）の延長で、登録RPC完了後に
+    次のQR撮影カメラを自動起動＝タップ0（autoNextScan）。文脈失効時は待受＝全面ボタンで1タップ。
+
+  QR解読: 静止画から BarcodeDetector（対応ブラウザのみ。iOS Safariには無い）を先に試し、
+          未対応/検出できない時は html5-qrcode v2.3.8（./html5-qrcode.min.js 同梱・外部CDN非依存）の
+          scanFile へフォールバック。376KBの同ライブラリは初期表示では読み込まず、
+          実際に解読が必要になった瞬間に遅延読み込みする。
+
+  デプロイ先（オーナー作業・本Claudeセッションでは実施しない）:
+    FTPで /docs/quickreg/ へ index.html と html5-qrcode.min.js をアップロードし、
+    https://www.antique-takahashi.com/docs/quickreg/index.html でアクセスできるようにする。
+    アップロード後、GASのスクリプトプロパティ QUICKREG_PAGE_URL にこのURLを設定する。
+
+  認証の取り扱い（仕様🔴）:
+    - トークンはURLクエリで受領後、即 history.replaceState でURLから消す（履歴・肩越し露出対策）。
+    - 保持はメモリ＋sessionStorage（タブを閉じれば消える）。localStorageへは絶対に保存しない。
+    - 期限切れ・上限到達・失効はサーバ判定に従い「開き直してください」を表示するだけ＝再発行しない。
+-->
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#1b1916">
+<title>かんたん新規登録 - アンティーク家具たかはし</title>
+<!-- html5-qrcode.min.js(376KB)はここで読み込まない。解読が必要な時に遅延読み込み（loadQrLib参照） -->
+<style>
+  /* ===== パレット（admin.html #easy-view-quickreg と同一。カンプ Phone.dc.html renderVals()） ===== */
+  :root {
+    --sans: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+    --serif: "Hiragino Mincho ProN", "Yu Mincho", serif;
+    --q-bg: #e9e2d5; --q-surface: #f8f3ea; --q-surface2: #efe7d9; --q-ink: #2b2620;
+    --q-sub: #6f665a; --q-line: #ddd3c3; --q-accent: #a75f34; --q-accent-ink: #fbf6ee;
+    --q-green: #3f7a4e; --q-blue: #3a6b9e; --q-amber: #a06f1c; --q-red: #a8473b;
+    --q-gray: #948b7d; --q-cam: #1b1916; --q-cam-ink: #efe9df; --q-scrim: rgba(20,18,15,.5);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --q-bg: #161310; --q-surface: #221e18; --q-surface2: #2b261f; --q-ink: #f1ece2;
+      --q-sub: #a79d8f; --q-line: #38322a; --q-accent: #c47a48; --q-accent-ink: #1a140f;
+      --q-green: #78b389; --q-blue: #6fa0cf; --q-amber: #d0a24e; --q-red: #d17b6f;
+      --q-gray: #9b9284; --q-cam: #0d0c0a; --q-cam-ink: #efe9df; --q-scrim: rgba(0,0,0,.55);
+    }
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; overscroll-behavior: none; }
+  body {
+    font-family: var(--sans); background: var(--q-bg); color: var(--q-ink);
+    position: fixed; inset: 0; overflow: hidden; /* 1画面完結・ページスクロールなし */
+  }
+  #app { position: fixed; inset: 0; display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+
+  /* --- ヘッダーバー --- */
+  .qreg-top {
+    flex: none; display: flex; align-items: center; gap: 10px; min-height: 52px;
+    padding: 6px 14px; background: var(--q-surface); border-bottom: 1px solid var(--q-line);
+    padding-top: calc(6px + env(safe-area-inset-top));
+  }
+  .qreg-back {
+    flex: none; display: inline-flex; align-items: center; justify-content: center;
+    width: 40px; height: 40px; border-radius: 10px; cursor: pointer; border: none; background: none;
+    font-size: 20px; color: var(--q-sub); font-family: var(--sans);
+  }
+  .qreg-back:active { background: var(--q-surface2); }
+  .qreg-logo {
+    width: 27px; height: 27px; border-radius: 7px; background: var(--q-accent);
+    color: var(--q-accent-ink); display: flex; align-items: center; justify-content: center;
+    font-family: var(--serif); font-size: 15px; font-weight: 600; flex: none;
+  }
+  .qreg-top-brand { font-size: 8.5px; letter-spacing: .2em; color: var(--q-sub); font-weight: 600; line-height: 1.2; }
+  .qreg-top-title { font-size: 13px; color: var(--q-ink); font-weight: 600; line-height: 1.2; }
+  .qreg-top-timer { margin-left: auto; font-size: 11px; color: var(--q-sub); white-space: nowrap; }
+  .qreg-top-timer.warn { color: var(--q-amber); font-weight: 700; }
+
+  /* --- 撮影ステージ（待受=全面の暗色面に撮影CTA／入力中=94pxストリップに縮む） --- */
+  #cam-zone { flex: 1; min-height: 0; position: relative; background: var(--q-cam); overflow: hidden; }
+  body.entry #cam-zone { flex: none; height: 94px; }
+  body.entry .qreg-count-pill { display: none; }
+  /* 待受面＝画面全体がひとつの撮影ボタン（2026-07-23オーナー指摘「この画面無駄なので直接カメラに」。
+     読込直後の自動起動はブラウザ仕様で不可能（NotAllowedError実測）なので、1件目のみこの全面ボタン1タップ。
+     2件目以降は「登録して次へ」の操作文脈でカメラを自動起動する＝タップ0（autoNextScan参照） */
+  #still-stage {
+    position: absolute; inset: 0; z-index: 3; width: 100%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; padding: 24px 20px; text-align: center;
+    background: none; border: none; cursor: pointer; font-family: var(--sans);
+    color: var(--q-cam-ink); -webkit-tap-highlight-color: transparent;
+  }
+  #still-stage:active { background: rgba(255,255,255,.07); }
+  body.entry #still-stage { display: none; }
+  .qreg-still-icon {
+    width: 108px; height: 108px; border-radius: 50%; background: var(--q-accent);
+    color: var(--q-accent-ink); display: flex; align-items: center; justify-content: center;
+    font-size: 52px; box-shadow: 0 6px 18px var(--q-scrim); pointer-events: none;
+  }
+  #still-stage:active .qreg-still-icon { transform: scale(.96); }
+  .qreg-still-label { font-size: 19px; font-weight: 700; pointer-events: none; }
+  .qreg-count-pill {
+    position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 6px; background: var(--q-scrim);
+    color: var(--q-cam-ink); padding: 7px 14px; border-radius: 999px; font-size: 12px;
+    white-space: nowrap; pointer-events: none; z-index: 3;
+  }
+  .qreg-count-pill b { font-weight: 700; }
+  /* 入力中はストリップ中央に「読み取り完了」ピル */
+  .qreg-done-pill {
+    display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    align-items: center; gap: 7px; background: var(--q-scrim); color: var(--q-cam-ink);
+    padding: 6px 13px; border-radius: 999px; font-size: 12px; z-index: 3; white-space: nowrap;
+  }
+  body.entry .qreg-done-pill { display: flex; }
+  .qreg-done-pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--q-green); }
+
+  /* 成功/エラートースト（撮影ステージ下部に浮かぶカード） */
+  #qreg-toast { position: absolute; bottom: 66px; left: 16px; right: 16px; pointer-events: none; z-index: 4; }
+  body.entry #qreg-toast { display: none; }
+  #qreg-toast .msg {
+    display: flex; align-items: center; gap: 11px; margin: 0;
+    background: var(--q-surface); border: 1px solid var(--q-green); border-radius: 14px;
+    padding: 12px 14px; box-shadow: 0 10px 28px var(--q-scrim);
+    font-size: 13.5px; color: var(--q-ink); font-weight: 700;
+  }
+  #qreg-toast .msg.ok::before {
+    content: "✓"; width: 26px; height: 26px; border-radius: 50%; background: var(--q-green);
+    color: #fff; display: flex; align-items: center; justify-content: center; font-size: 15px; flex: none;
+  }
+  #qreg-toast .msg.err { border-color: var(--q-red); color: var(--q-red); }
+  #qreg-toast .msg.err::before {
+    content: "!"; width: 26px; height: 26px; border-radius: 50%; background: var(--q-red);
+    color: #fff; display: flex; align-items: center; justify-content: center; font-size: 15px; flex: none;
+  }
+
+  /* --- 【2026-07-23追加】ページ内カメラ（getUserMedia）--- */
+  /* 撮影中は #cam-zone をそのまま全面ステージへ広げる（DOM上は撮影ステージのまま＝配置は1か所）。
+     入力シート中（body.entry）でも商品写真が撮れるよう、最前面に出す。 */
+  body.camlive #cam-zone {
+    position: fixed; inset: 0; z-index: 40; height: auto; flex: 1;
+  }
+  #live-video {
+    display: none; position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; background: var(--q-cam); z-index: 1;
+  }
+  body.camlive #live-video { display: block; }
+  body.camlive #still-stage, body.camlive .qreg-count-pill,
+  body.camlive .qreg-done-pill, body.camlive #qreg-toast { display: none; }
+  #live-controls { display: none; }
+  body.camlive #live-controls {
+    display: flex; position: absolute; inset: auto 0 0 0; z-index: 3;
+    align-items: center; justify-content: center; gap: 18px;
+    padding: 18px 20px calc(22px + env(safe-area-inset-bottom));
+    background: linear-gradient(to top, var(--q-scrim), rgba(0,0,0,0));
+  }
+  #live-shutter {
+    width: 84px; height: 84px; border-radius: 50%; border: 4px solid var(--q-cam-ink);
+    background: var(--q-accent); color: var(--q-accent-ink); font-size: 34px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    font-family: var(--sans); box-shadow: 0 6px 18px var(--q-scrim);
+  }
+  #live-shutter:active { transform: scale(.95); }
+  #live-shutter:disabled { opacity: .5; }
+  #live-cancel {
+    position: absolute; left: 16px; bottom: calc(46px + env(safe-area-inset-bottom));
+    padding: 9px 14px; border-radius: 10px; border: 1px solid var(--q-cam-ink);
+    background: var(--q-scrim); color: var(--q-cam-ink); font-size: 13px;
+    cursor: pointer; font-family: var(--sans);
+  }
+  #live-hint {
+    display: none; position: absolute; top: calc(14px + env(safe-area-inset-top)); left: 16px; right: 16px;
+    z-index: 3; text-align: center; color: var(--q-cam-ink); font-size: 13.5px; font-weight: 700;
+    text-shadow: 0 1px 6px rgba(0,0,0,.6); pointer-events: none;
+  }
+  body.camlive #live-hint { display: block; }
+
+  /* 撮影方式の切り替え（待受下部バーの先頭） */
+  .qreg-mode-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 9px;
+  }
+  .qreg-mode-now { font-size: 11px; color: var(--q-sub); flex: 1; min-width: 0; line-height: 1.5; }
+  .qreg-mode-now b { font-family: var(--serif); color: var(--q-ink); font-weight: 600; }
+  #cam-mode-btn {
+    flex: none; padding: 9px 13px; border: 1px solid var(--q-accent); border-radius: 10px;
+    background: var(--q-surface); color: var(--q-accent); font-size: 12.5px; font-weight: 700;
+    cursor: pointer; font-family: var(--sans);
+  }
+  #cam-mode-btn:active { background: var(--q-surface2); }
+
+  /* --- 待受下部バー（手入力の逃げ道） --- */
+  .qreg-standby-bar {
+    flex: none; padding: 13px 16px calc(16px + env(safe-area-inset-bottom));
+    background: var(--q-surface); border-top: 1px solid var(--q-line);
+  }
+  body.entry .qreg-standby-bar { display: none; }
+  .qreg-standby-bar details { margin-top: 0; }
+  .qreg-standby-bar summary {
+    font-size: 11.5px; color: var(--q-sub); cursor: pointer; text-align: center; list-style: none; padding: 4px;
+  }
+  .qreg-standby-bar summary::-webkit-details-marker { display: none; }
+  .qreg-standby-bar summary::marker { content: ""; }
+  .qreg-manual-row { display: flex; gap: 8px; margin-top: 8px; }
+  .qreg-manual-row input {
+    flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid var(--q-line); border-radius: 10px;
+    font-size: 16px; font-family: var(--sans); background: var(--q-surface2); color: var(--q-ink);
+  }
+  .qreg-manual-row button {
+    flex: none; padding: 8px 14px; border: 1px solid var(--q-line); border-radius: 10px;
+    background: var(--q-surface); color: var(--q-ink); font-size: 14px; cursor: pointer; font-family: var(--sans);
+  }
+  #qreg-scan-status .msg, #qreg-entry-status .msg {
+    margin: 0 0 10px; padding: 10px 13px; border-radius: 12px; font-size: 13px; line-height: 1.6;
+    display: flex; gap: 8px; border: 1px solid var(--q-line); background: var(--q-surface2); color: var(--q-ink);
+  }
+  #qreg-scan-status .msg.err, #qreg-entry-status .msg.err { border-color: var(--q-red); color: var(--q-red); background: transparent; }
+  #qreg-scan-status .msg.ok, #qreg-entry-status .msg.ok { border-color: var(--q-green); color: var(--q-green); background: transparent; }
+
+  /* --- せり上がりシート（ID確定後） --- */
+  #entry-stage { display: none; flex: 1; min-height: 0; flex-direction: column; }
+  body.entry #entry-stage { display: flex; }
+  .qreg-sheet {
+    flex: 1; min-height: 0; overflow-y: auto; background: var(--q-surface);
+    border-top-left-radius: 22px; border-top-right-radius: 22px; margin-top: -16px; position: relative;
+    box-shadow: 0 -8px 24px var(--q-scrim); padding: 12px 16px 8px; z-index: 5;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .qreg-handle { width: 38px; height: 4px; border-radius: 2px; background: var(--q-line); align-self: center; flex: none; }
+  .qreg-idcard {
+    display: flex; align-items: flex-start; gap: 11px; background: var(--q-surface2);
+    border: 1px solid var(--q-line); border-radius: 14px; padding: 11px 13px; flex: none;
+  }
+  /* 撮った写真＝148px。実物との照合に足りる大きさ（小さすぎると確認できない） */
+  .qreg-shot {
+    width: 148px; height: 148px; flex: none; border-radius: 8px; overflow: hidden;
+    border: 1px solid var(--q-line);
+    background: repeating-linear-gradient(45deg, #eee9df 0 8px, #e6e0d3 8px 16px);
+  }
+  .qreg-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .qreg-idmeta { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  .qreg-id { font-family: var(--serif); font-size: 17px; font-weight: 600; color: var(--q-accent); }
+  .qreg-idname { font-size: 14px; font-weight: 600; color: var(--q-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qreg-idsub { font-size: 10.5px; color: var(--q-sub); }
+  .qreg-badge { font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 999px; white-space: nowrap; flex: none; }
+  .qreg-badge-wait { border: 1px solid var(--q-amber); color: var(--q-amber); }
+  .qreg-badge-ready { border: 1px solid var(--q-green); color: var(--q-green); }
+  .qreg-photo-cta {
+    width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; flex: none;
+    background: var(--q-accent); color: var(--q-accent-ink); border: none; border-radius: 15px;
+    padding: 17px; font-size: 16.5px; font-weight: 700; cursor: pointer; font-family: var(--sans);
+  }
+  .qreg-photo-cta:active { transform: scale(.98); }
+  .qreg-photo-cta:disabled { opacity: .55; }
+  /* 写真後はサムネと「もう1枚」を同じ1行にまとめる（縦の消費を1行分に抑える＝スクロール抑止） */
+  .qreg-photo-block { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: none; }
+  .qreg-photo-block .qreg-photo-cta { flex: 1 1 100%; }
+  .qreg-photo-block .qreg-photo-cta.qreg-photo-again {
+    flex: none; background: none; border: 1px solid var(--q-line); color: var(--q-sub);
+    font-size: 12px; font-weight: 500; padding: 7px 12px; border-radius: 10px; width: auto; order: 2;
+  }
+  .qreg-photo-row { display: contents; }
+  .qreg-photo-row img {
+    width: 44px; height: 44px; object-fit: cover; border-radius: 10px;
+    border: 1px solid var(--q-line); order: 1;
+  }
+  .qreg-form { border: 1px solid var(--q-line); border-radius: 14px; overflow: hidden; flex: none; }
+  .qreg-formrow + .qreg-formrow { border-top: 1px solid var(--q-line); }
+  .qreg-formrow summary { display: flex; align-items: center; gap: 10px; padding: 13px 14px; cursor: pointer; list-style: none; }
+  .qreg-formrow summary::-webkit-details-marker { display: none; }
+  .qreg-formrow summary::marker { content: ""; }
+  .qreg-form-label { font-size: 12.5px; color: var(--q-sub); width: 58px; flex: none; }
+  .qreg-price-display { font-size: 14px; color: var(--q-gray); }
+  .qreg-price-display.qreg-price-set { font-size: 16px; color: var(--q-ink); font-weight: 700; font-family: var(--serif); }
+  #qreg-location-label { font-size: 14.5px; color: var(--q-ink); font-weight: 600; }
+  .qreg-chip {
+    margin-left: auto; font-size: 10.5px; color: var(--q-sub); border: 1px solid var(--q-line);
+    padding: 2px 7px; border-radius: 6px; flex: none;
+  }
+  .qreg-chip-blue { margin-left: 0; font-size: 10px; color: var(--q-blue); border: 1px solid var(--q-blue); border-radius: 999px; white-space: nowrap; }
+  .qreg-chevron { margin-left: auto; color: var(--q-sub); font-size: 12px; flex: none; }
+  .qreg-form-body { padding: 0 14px 13px; }
+  .qreg-form-body input, .qreg-form-body select, .qreg-form-body textarea {
+    width: 100%; padding: 11px 13px; border: 1px solid var(--q-line); border-radius: 10px;
+    font-size: 16px; font-family: var(--sans); background: var(--q-surface2); color: var(--q-ink); min-height: 46px;
+  }
+  .qreg-form-body textarea { min-height: 76px; resize: vertical; line-height: 1.6; }
+
+  /* --- 下部固定アクション --- */
+  .qreg-fixed-bottom {
+    display: none; flex: none; padding: 12px 16px calc(14px + env(safe-area-inset-bottom));
+    background: var(--q-surface); border-top: 1px solid var(--q-line);
+  }
+  body.entry .qreg-fixed-bottom { display: block; }
+  .qreg-register {
+    width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+    background: var(--q-accent); color: var(--q-accent-ink); border: none; border-radius: 16px;
+    padding: 17px; font-size: 17px; font-weight: 700; cursor: pointer; font-family: var(--sans);
+    box-shadow: 0 6px 18px var(--q-scrim);
+  }
+  .qreg-register:active { transform: scale(.985); }
+  .qreg-register:disabled {
+    background: var(--q-surface2); color: var(--q-gray); border: 1px dashed var(--q-line);
+    font-size: 14.5px; font-weight: 600; box-shadow: none; opacity: 1; cursor: not-allowed;
+  }
+
+  /* --- 全面メッセージパネル（起動エラー・期限切れ） --- */
+  #fatal-panel {
+    display: none; position: fixed; inset: 0; z-index: 50; background: var(--q-bg);
+    padding: calc(24px + env(safe-area-inset-top)) 20px calc(24px + env(safe-area-inset-bottom));
+    overflow-y: auto;
+  }
+  #fatal-panel .box {
+    max-width: 420px; margin: 8vh auto 0; background: var(--q-surface); border: 1px solid var(--q-line);
+    border-radius: 18px; padding: 22px 18px; box-shadow: 0 10px 28px var(--q-scrim);
+  }
+  #fatal-panel h2 { font-size: 17px; margin: 0 0 10px; color: var(--q-ink); }
+  #fatal-panel p { font-size: 13.5px; line-height: 1.8; color: var(--q-sub); margin: 0 0 14px; }
+  #fatal-panel button {
+    width: 100%; padding: 14px; border-radius: 12px; border: none; font-size: 15px; font-weight: 700;
+    font-family: var(--sans); cursor: pointer; margin-top: 8px;
+  }
+  #fatal-panel .btn-main { background: var(--q-accent); color: var(--q-accent-ink); }
+  #fatal-panel .btn-sub { background: var(--q-surface2); color: var(--q-ink); border: 1px solid var(--q-line); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="qreg-top">
+    <button type="button" class="qreg-back" aria-label="もどる" onclick="uiBack()">←</button>
+    <div class="qreg-logo">蔵</div>
+    <div>
+      <div class="qreg-top-brand">ANTIQUE TAKAHASHI</div>
+      <div class="qreg-top-title">かんたん新規登録</div>
+    </div>
+    <div class="qreg-top-timer" id="top-timer"></div>
+  </div>
+
+  <!-- 撮影ステージ（待受=全面／入力中=94pxストリップ）
+       撮影方式は端末で2通りある（memory project_qr_quickreg_device_compat）:
+       ・OSカメラ方式（既定・Galaxy等）＝ライブ映像を出さない。#live-video は非表示のまま起動しない
+       ・ページ内カメラ方式（Oppo等で必須）＝下の #live-video が getUserMedia でライブ映像を出す
+       ⚠️ 以前ここに「ライブ映像は無い＝getUserMedia不使用」と書いてあったが、
+          同じブロックの中に #live-video がある＝既定の話であって「無い」ではない。 -->
+  <div id="cam-zone">
+    <!-- 【2026-07-23】待受面＝画面全体がひとつの撮影ボタン。1タップでOSカメラが起動する -->
+    <button type="button" id="still-stage" onclick="startScan()">
+      <span class="qreg-still-icon">📷</span>
+      <span class="qreg-still-label" id="still-stage-label">タップしてQRを撮影</span>
+    </button>
+    <!-- 【2026-07-23追加】ページ内カメラ（getUserMedia）。既定は非表示＝OSカメラ方式では一切起動しない -->
+    <video id="live-video" autoplay playsinline muted></video>
+    <div id="live-hint">QRラベルを枠いっぱいに写してシャッター</div>
+    <div id="live-controls">
+      <button type="button" id="live-cancel" onclick="cancelLiveCamera()">やめる</button>
+      <button type="button" id="live-shutter" aria-label="撮影" onclick="liveShutter()">●</button>
+    </div>
+    <div class="qreg-count-pill" id="session-pill" style="display:none;">この画面で <b id="session-count">0</b>件 登録済み</div>
+    <span class="qreg-done-pill"><i></i><span>読み取り完了</span></span>
+    <div id="qreg-toast"></div>
+  </div>
+
+  <!-- 待受: 下部バー -->
+  <div class="qreg-standby-bar">
+    <!-- 【2026-07-23追加】撮影方式の切り替え（端末ごとにlocalStorageへ保存＝次回もこの方式）。
+         既定はOSカメラ方式（Galaxyで正常・速い）。Oppoのようにカメラから写真が返らない端末だけ
+         「ページ内カメラで撮る」に切り替える。いつでも「OSカメラに戻す」で戻せる。 -->
+    <div class="qreg-mode-row">
+      <div class="qreg-mode-now" id="cam-mode-now"></div>
+      <button type="button" id="cam-mode-btn" onclick="toggleCamMode()"></button>
+    </div>
+    <div id="qreg-scan-status"></div>
+    <!-- QR読み取り用のファイル入力（唯一の読み取り経路）。解読はBarcodeDetector優先＋
+         ライブラリ遅延読み込みフォールバック（decodeQrFromFile参照）。照合以降は従来と同じ経路。 -->
+    <input type="file" id="still-scan-input" accept="image/*" capture="environment"
+           style="display:none;" onchange="onStillScanPhoto(event)">
+    <!-- 商品写真もファイル撮影で撮る -->
+    <input type="file" id="photo-file-input" accept="image/*" capture="environment"
+           style="display:none;" onchange="onEntryPhotoFile(event)">
+    <details id="manual-details">
+      <summary>QRが読めない時はIDを手入力</summary>
+      <div class="qreg-manual-row">
+        <input type="text" id="manual-id" placeholder="例: T-00042" autocomplete="off"
+               onkeydown="if(event.key==='Enter')manualStart()">
+        <button type="button" onclick="manualStart()">開始</button>
+      </div>
+    </details>
+    <div id="still-decode-work" style="display:none;"></div>
+  </div>
+
+  <!-- 入力: せり上がりシート -->
+  <div id="entry-stage">
+    <div class="qreg-sheet">
+      <div class="qreg-handle"></div>
+      <!-- 🔴【2026-07-29】カタログ・管理画面と**同じ骨格**にする（写真｜ID → 中身）。
+           撮った写真をIDの横に小さく置く＝「今どれを登録しているか」が一目で分かる。
+           ⚠️ 写真の差し込み先(#photo-area)と処理は変えていない（位置だけ移した）。 -->
+      <div class="qreg-idcard">
+        <div id="photo-area" class="qreg-shot"></div>
+        <div class="qreg-idmeta">
+          <div class="qreg-id" id="id-pill"></div>
+          <div class="qreg-idsub">未使用ラベル ─ 写真1枚で登録できます</div>
+          <span class="qreg-badge qreg-badge-wait" id="state-badge">！写真待ち</span>
+        </div>
+      </div>
+      <div class="qreg-photo-block">
+        <button type="button" class="qreg-photo-cta" id="photo-btn" onclick="takePhoto()">📷 写真を1枚撮る</button>
+      </div>
+      <div class="qreg-form">
+        <details id="price-details" class="qreg-formrow">
+          <summary>
+            <span class="qreg-form-label">価格</span>
+            <span class="qreg-price-display" id="price-display">金額を入力（任意）</span>
+            <span class="qreg-chip">任意</span>
+          </summary>
+          <div class="qreg-form-body">
+            <input type="number" id="price" inputmode="numeric" placeholder="例: 7800（空欄OK）" oninput="syncUi()">
+          </div>
+        </details>
+        <details id="location-details" class="qreg-formrow">
+          <summary>
+            <span class="qreg-form-label">保管場所</span>
+            <b id="qreg-location-label">未選択</b>
+            <span class="qreg-chip-blue qreg-chip">前回値</span>
+            <span class="qreg-chevron">▾</span>
+          </summary>
+          <div class="qreg-form-body">
+            <select id="location" onchange="onLocationChange()">
+              <option value="">選択してください</option>
+              <option value="店舗">店舗</option>
+              <option value="店舗2階">店舗2階（物置）</option>
+              <option value="ガレージ">ガレージ</option>
+              <option value="有楽町">有楽町</option>
+            </select>
+          </div>
+        </details>
+        <!-- 【2026-07-22追加】補足メモ（任意・既定は閉じる＝必須動線を押し出さない）。
+             registerProductのdata.correctionNote→マスタ列9「補足・訂正メモ(人間)」へ。
+             AI補完（モードB）がこの記入を最優先で商品説明に反映する。
+             ⚠️保管場所と違い「前回値の保持」をしない＝品ごとに必ずクリア（openEntryで空にする） -->
+        <details id="correction-details" class="qreg-formrow">
+          <summary>
+            <span class="qreg-form-label">補足メモ</span>
+            <span class="qreg-price-display" id="correction-display">気づきがあれば（任意）</span>
+            <span class="qreg-chip">任意</span>
+          </summary>
+          <div class="qreg-form-body">
+            <textarea id="correction-note" rows="3" oninput="syncUi()"
+              placeholder="傷・サイズ・正しい商品名などを自由に。後でAIが商品説明を作る時にこの内容を最優先で反映します"></textarea>
+          </div>
+        </details>
+      </div>
+      <div id="qreg-entry-status"></div>
+    </div>
+  </div>
+
+  <!-- 入力: 下部固定「登録して次へ」 -->
+  <div class="qreg-fixed-bottom">
+    <button type="button" class="qreg-register" id="register-btn" onclick="submitRegister()">登録して次へ →</button>
+  </div>
+</div>
+
+<!-- 全面メッセージ（起動エラー／期限切れ・上限。行き止まりにしない導線つき） -->
+<div id="fatal-panel">
+  <div class="box">
+    <h2 id="fatal-title"></h2>
+    <p id="fatal-text"></p>
+    <button type="button" class="btn-main" id="fatal-retry-btn" onclick="location.reload()">もう一度試す</button>
+    <button type="button" class="btn-sub" onclick="closeOrGuide()">このタブを閉じて管理画面へ戻る</button>
+    <p style="margin-top:14px;">期限が切れた時は、元の管理画面タブに戻り「かんたん新規登録」を開き直してください。</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---- トークン・接続先の受領（URLクエリ→即URLから消去。保持はメモリ＋sessionStorageのみ） ----
+  var qs = new URLSearchParams(location.search);
+  var token = qs.get('token') || '';
+  var apiUrl = qs.get('api') || qs.get('apiUrl') || '';
+  try {
+    if (token) {
+      sessionStorage.setItem('quickreg_token', token);
+      if (apiUrl) sessionStorage.setItem('quickreg_api', apiUrl);
+    } else {
+      token = sessionStorage.getItem('quickreg_token') || '';
+      apiUrl = apiUrl || sessionStorage.getItem('quickreg_api') || '';
+    }
+  } catch (e) { /* sessionStorage不可でもメモリ保持で続行 */ }
+  if (location.search) {
+    try { history.replaceState(null, '', location.pathname); } catch (e) {}
+  }
+
+  function showFatal(title, text, allowRetry) {
+    try { stopLiveCamera(); } catch (e) {} // 全面エラー時もページ内カメラを残さない
+    document.getElementById('fatal-title').textContent = title;
+    document.getElementById('fatal-text').textContent = text;
+    document.getElementById('fatal-retry-btn').style.display = allowRetry ? '' : 'none';
+    document.getElementById('fatal-panel').style.display = 'block';
+  }
+  window.closeOrGuide = function () {
+    window.close();
+    setTimeout(function () {
+      document.getElementById('fatal-text').textContent =
+        'このタブを自動で閉じられませんでした。手動でタブを閉じ、管理画面（元のタブ）に戻ってください。';
+      document.getElementById('fatal-panel').style.display = 'block';
+    }, 400);
+  };
+
+  if (!token || !apiUrl) {
+    showFatal('開けませんでした', '必要な情報（トークン・接続先）が不足しています。管理画面の「かんたん新規登録」から開き直してください。', false);
+    return;
+  }
+  // 接続先はGASのexec URLのみ許可（誘導リンク偽造でよそへ写真・トークンを送らせない）
+  if (apiUrl.indexOf('https://script.google.com/') !== 0) {
+    showFatal('開けませんでした', '接続先が不正です。管理画面から開き直してください。', false);
+    return;
+  }
+
+  // ---- トークン有効期限の表示（payload先頭部をローカルdecodeするだけ。検証はサーバが行う） ----
+  var tokenExpMs = 0;
+  try {
+    var b64 = token.split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
+    tokenExpMs = Number(JSON.parse(atob(b64)).exp) || 0;
+  } catch (e) { tokenExpMs = 0; }
+  function tickTimer() {
+    if (!tokenExpMs) return;
+    var el = document.getElementById('top-timer');
+    var remain = tokenExpMs - Date.now();
+    if (remain <= 0) {
+      el.textContent = '期限切れ';
+      showFatal('期限切れです', '期限切れです。管理画面から開き直してください。', false);
+      return;
+    }
+    var m = Math.ceil(remain / 60000);
+    el.textContent = '残り' + m + '分';
+    el.className = 'qreg-top-timer' + (m <= 5 ? ' warn' : '');
+    setTimeout(tickTimer, 20000);
+  }
+  tickTimer();
+
+  // 🔴【2026-07-28】期限ぎわに新しい品を始めると、**写真だけDriveに残って登録が落ちる**。
+  //   実害＝T-00164（2026-07-27 14:57）。棚の前で貼って撮った現物が、在庫に1点も載らなかった。
+  //   写真のアップロードは**取り消す口がサーバに無い**（孤児として残る）ので、
+  //   止めるなら「まだ失うものが無いうち」＝**写真を撮る前**しかない。
+  //   サーバの判定は一切変えない（GASは触らない＝不変条件4の手順を要しない画面側だけの防御）。
+  //   ※ tokenExpMs はトークンの payload 由来で、tickTimer が既に同じ値で期限切れを判定している
+  //     （＝この画面は元からこの時計を信頼している）。読めなかった時（0）は何もしない。
+  function remainMs() { return tokenExpMs ? (tokenExpMs - Date.now()) : 0; }
+  var PHOTO_MIN_MS = 60000;    // 写真1枚の送信＋登録が通り切るのに要る最低限
+  var ENTRY_WARN_MS = 150000;  // 新しい品を始める前に「もう始めない方がよい」と伝える線
+
+  // ---- RPC（capture/index.htmlと同じ text/plain POST。認可はquickRegToken） ----
+  function rpc(action, data) {
+    data = data || {};
+    data.quickRegToken = token;
+    return fetch(apiUrl, {
+      method: 'POST', mode: 'cors',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: action, data: data })
+    }).then(function (r) { return r.json(); }).then(function (res) {
+      if (!res || !res.ok) throw new Error((res && res.error ? String(res.error) : '不明なエラー').replace(/^Error:\s*/, ''));
+      return res.result;
+    });
+  }
+  // トークン自体が終わった（期限切れ・失効・上限・署名不正）系のエラーか（サーバ文言で判定）
+  function isTokenDeadError(msg) { return String(msg).indexOf('開き直してください') !== -1; }
+  // 【2026-07-26追加】登録件数の上限で死んだ場合だけ、脱出手順を足す。
+  // 同じタブで開き直すと管理画面が同じ事前取得トークンを再び渡すため（admin.html:6402）、
+  // 「開き直す」だけでは同じ死んだトークンで開いてしまい、また1点分の作業を捨てることになる。
+  function tokenDeadHint_(msg) {
+    var s = String(msg || '');
+    if (s.indexOf('上限') === -1) return s;
+    return s + '\n\n※このタブを閉じ、管理画面のタブを一度「再読み込み」してから、'
+      + 'もう一度「かんたん新規登録」を開いてください（そのまま開き直すと同じ状態になります）。';
+  }
+
+  // ---- 状態 ----
+  var busy = false;            // resolve中
+  var entryOpen = false;       // 入力シート表示中
+  var uploading = false;       // 写真の前処理（リサイズ）＋アップロード中。前処理も含めるのが要点（下記 entryGen 参照）
+  var submitting = false;
+  // 🔴【2026-07-26追加・Codex指摘】入力シートの「世代」。openEntry / resetToStandby のたびに増える。
+  //   遅れて返ったRPC応答が、既に別の品へ移った画面を触ってしまう事故を塞ぐための番号。
+  //   実際に起きうる壊れ方（エラーが1つも出ない）:
+  //     A品の写真が処理中 → ←や次のQR読取でB品へ → A品の応答が返る
+  //     → currentFolderUrl に A品のフォルダURLが入り、photoCount も増える
+  //     → B品は「写真0枚・A品のフォルダURL」で登録が通る
+  //   サーバ側の実写真枚数チェック（コード.gs:2999-3003）は folderUrl が空のときしか走らないため発火しない。
+  //   よって **成功・失敗の両方のコールバックで**、状態を触る前に世代を照合する。
+  //   例外＝トークン自体が死んだエラーだけは、古い世代から届いてもページ全体の問題なので通す。
+  var entryGen = 0;
+  var currentMasterId = null;
+  var currentPreToken = null;
+  var currentFolderUrl = null;
+  var photoCount = 0;
+  var sessionCount = 0;
+  var toastTimer = null;
+
+  var LAST_LOCATION_KEY = 'quickreg_last_location'; // 保管場所の前回値のみlocalStorage（トークンは保存しない）
+  // 🔴【2026-07-27】価格の欄を「開いていたか」だけ覚える。
+  //   保管場所は前回値を引き継ぐのに価格の欄だけ毎回たたまれ、価格を入れる運用だと
+  //   1点につき「開く」タップが必ず1回増えていた。棚1つ400点なら400タップ。
+  //   ⚠️ 覚えるのは**開閉の状態だけ**。金額そのものは引き継がない
+  //     （前の品の値が次の品に混入すると、静かに間違った値段が付く）。
+  var PRICE_OPEN_KEY = 'quickreg_price_open';
+  var lastPriceOpen = (function () { try { return localStorage.getItem(PRICE_OPEN_KEY) === '1'; } catch (e) { return false; } })();
+  var lastLocation = (function () { try { return localStorage.getItem(LAST_LOCATION_KEY) || ''; } catch (e) { return ''; } })();
+
+  // ---- UI小物 ----
+  function toast(msg, kind) {
+    var el = document.getElementById('qreg-toast');
+    if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+    if (!msg) { el.innerHTML = ''; return; }
+    var div = document.createElement('div');
+    div.className = 'msg ' + (kind || 'info');
+    div.textContent = msg;
+    el.innerHTML = '';
+    el.appendChild(div);
+    toastTimer = setTimeout(function () { el.innerHTML = ''; }, kind === 'ok' ? 4000 : 5000);
+  }
+  function scanStatus(msg, kind) {
+    var el = document.getElementById('qreg-scan-status');
+    el.innerHTML = '';
+    if (!msg) return;
+    var div = document.createElement('div');
+    div.className = 'msg ' + (kind || 'info');
+    div.textContent = msg;
+    el.appendChild(div);
+  }
+  function entryStatus(msg, kind) {
+    var el = document.getElementById('qreg-entry-status');
+    el.innerHTML = '';
+    if (!msg) return;
+    var div = document.createElement('div');
+    div.className = 'msg ' + (kind || 'info');
+    div.textContent = msg;
+    el.appendChild(div);
+  }
+  window.syncUi = function () {
+    var ready = photoCount > 0;
+    var badge = document.getElementById('state-badge');
+    badge.textContent = ready ? '✓ 準備完了' : '！写真待ち';
+    badge.className = 'qreg-badge ' + (ready ? 'qreg-badge-ready' : 'qreg-badge-wait');
+    var photoBtn = document.getElementById('photo-btn');
+    photoBtn.classList.toggle('qreg-photo-again', ready);
+    photoBtn.textContent = ready ? '📷 もう1枚撮る（任意）' : '📷 写真を1枚撮る';
+    photoBtn.disabled = uploading;
+    var priceEl = document.getElementById('price');
+    var priceDisp = document.getElementById('price-display');
+    var n = Number(priceEl.value);
+    if (priceEl.value !== '' && isFinite(n)) {
+      priceDisp.textContent = '¥' + n.toLocaleString('ja-JP');
+      priceDisp.classList.add('qreg-price-set');
+    } else {
+      priceDisp.textContent = '金額を入力（任意）';
+      priceDisp.classList.remove('qreg-price-set');
+    }
+    var btn = document.getElementById('register-btn');
+    btn.disabled = !(currentMasterId && ready && !uploading && !submitting);
+    btn.textContent = ready ? '登録して次へ →' : '写真を撮ると登録できます';
+    var corr = document.getElementById('correction-note').value.trim();
+    var corrDisp = document.getElementById('correction-display');
+    if (corr) {
+      corrDisp.textContent = '記入あり（' + corr.length + '文字）';
+      corrDisp.classList.add('qreg-price-set');
+    } else {
+      corrDisp.textContent = '気づきがあれば（任意）';
+      corrDisp.classList.remove('qreg-price-set');
+    }
+    var pill = document.getElementById('session-pill');
+    document.getElementById('session-count').textContent = String(sessionCount);
+    pill.style.display = sessionCount > 0 ? '' : 'none';
+  }
+  function syncLocationLabel() {
+    var v = document.getElementById('location').value;
+    document.getElementById('qreg-location-label').textContent = v || '未選択';
+  }
+  window.onLocationChange = function () { syncLocationLabel(); }; // 前回値の保存は登録成功時のみ
+  window.uiBack = function () {
+    // 🔴【2026-07-26追加】←は画面最上部にあり、立ったまま片手で使うと最も誤爆する。
+    //   ここは「登録を破棄」する操作なのに確認が無く、写真を上げ終えた後でも無言で1点が消えていた
+    //   （Driveに上がった写真は孤児として残り、取り消す口はサーバに無い）。
+    //   なお beforeunload（ページ離脱）は resetToStandby では発火しないので、二重確認にはならない。
+    if (entryOpen) {
+      // 登録の送信中は戻らせない。画面だけ捨ててサーバ側の登録が成功すると、
+      // 「登録されたのに、されていないと思っている」状態になるため。
+      if (submitting) {
+        entryStatus('登録中です。結果が出るまでお待ちください…', 'info');
+        return;
+      }
+      // 写真を1枚でも撮った／処理中・送信中なら、捨ててよいか一度だけ聞く。
+      // 写真0枚（＝まだ何も残っていない）なら今までどおり無確認で戻す＝通常の手順は変わらない。
+      if ((uploading || photoCount > 0)
+          && !window.confirm('この品の入力を破棄して、QRの読み取りに戻りますか？\n'
+                             + '（撮った写真は取り消せません）')) {
+        return;
+      }
+    }
+    if (typeof stopLiveCamera === 'function') stopLiveCamera(); // ページ内カメラは必ず止める
+    if (entryOpen) { resetToStandby(false); toast('', ''); return; } // シート中の←は待受へ戻るだけ（登録は破棄）
+    closeOrGuide();
+  };
+
+  // ---- QR解読の道具立て（2026-07-23: 撮影方式のみ。getUserMediaは使わない） ----
+  // html5-qrcode(376KB)は初期表示では読み込まず、必要になった瞬間に遅延読み込みする。
+  var libPromise = null;
+  function loadQrLib() {
+    if (typeof Html5Qrcode !== 'undefined') return Promise.resolve();
+    if (libPromise) return libPromise;
+    libPromise = new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = './html5-qrcode.min.js';
+      s.onload = function () { resolve(); };
+      s.onerror = function () {
+        libPromise = null; // 次回リトライできるように
+        reject(new Error('QR読み取りライブラリを読み込めませんでした。通信状態を確認してもう一度お試しください'));
+      };
+      document.head.appendChild(s);
+    });
+    return libPromise;
+  }
+  // BarcodeDetector（対応ブラウザのみ。iOS Safariには無い＝その場合はnull→ライブラリへ）。
+  // 対応を名乗ってもdetectが機能しない環境があるため、検出0件でも必ずライブラリで再試行する。
+  // 【2026-07-23追加】約束の時間内に返らなければ諦めて既定値で先へ進む。
+  // AndroidのBarcodeDetectorは端末側の部品（Google Play開発者サービスのバーコードモジュール）を
+  // 後から取得して動く作りで、その部品が無い端末では応答が返らないまま止まることがある
+  // （オーナー実機: Galaxyは動くがOppoは撮影後に進まない、という差の説明がつく）。
+  // 待たされたら見切ってライブラリ側へ倒す。無言で固まるより、遅くても必ず結果を出す方がよい。
+  function withTimeout_(promise, ms, fallbackValue) {
+    return new Promise(function (resolve) {
+      var done = false;
+      var t = setTimeout(function () { if (!done) { done = true; resolve(fallbackValue); } }, ms);
+      Promise.resolve(promise).then(function (v) {
+        if (!done) { done = true; clearTimeout(t); resolve(v); }
+      }, function () {
+        if (!done) { done = true; clearTimeout(t); resolve(fallbackValue); }
+      });
+    });
+  }
+
+  var bdPromise = null;
+  function getBarcodeDetector() {
+    if (bdPromise) return bdPromise;
+    bdPromise = (function () {
+      try {
+        if (!('BarcodeDetector' in window)) return Promise.resolve(null);
+        return withTimeout_(BarcodeDetector.getSupportedFormats().then(function (fmts) {
+          if (fmts && fmts.indexOf('qr_code') !== -1) return new BarcodeDetector({ formats: ['qr_code'] });
+          return null;
+        }), 3000, null);
+      } catch (e) { return Promise.resolve(null); }
+    })();
+    return bdPromise;
+  }
+  function decodeWithLib(file) {
+    var prepShown = (typeof Html5Qrcode === 'undefined');
+    if (prepShown) scanStatus('読み取り準備中…', 'info');
+    return loadQrLib().then(function () {
+      scanStatus('写真からQRを読み取り中…', 'info');
+      var tmp = null;
+      try { tmp = new Html5Qrcode('still-decode-work', false); }
+      catch (e) { throw new Error('読み取り機能を初期化できませんでした'); }
+      function cleanup() { try { tmp.clear(); } catch (e) {} }
+      return tmp.scanFile(file, false).then(
+        function (text) { cleanup(); return text; },
+        function () {
+          cleanup();
+          throw new Error('QRを読み取れませんでした。もう一度撮るか、IDを手入力してください');
+        }
+      );
+    });
+  }
+  // ================= 【2026-07-23追加】大きな写真で端末が落ちないようにする =================
+  // 症状（オーナー実機・Oppo・Chrome）: 撮影直後に「メモリ不足のため直前の操作を完了できません」。
+  //
+  // 原因は、撮った写真を"原寸のまま"メモリへ展開していたこと。最近のAndroid機は5000万画素級で、
+  // 1枚を素で展開すると RGBA で数百MBになる。さらに解読は
+  //   ①createImageBitmap(file) で原寸展開 → ②見つからなければ scanFile(file) でもう一度原寸展開
+  // と二度行っていたため、非力な端末では確実に足りなくなる。
+  //
+  // 対策: 最初に一度だけ「縮小した1枚のcanvas」を作り、BarcodeDetectorもライブラリもそれを使う。
+  // createImageBitmap に resizeWidth を渡すと、ブラウザは縮小した状態でデコードする＝
+  // 原寸のピクセルをそもそもメモリに載せない。ここが肝。
+  // QRは1600px程度あれば十分読める（ラベルは画面の大部分を占める前提の撮り方のため）。
+  // 【2026-07-23 追加調整】1600→1200。ラベルは画面いっぱいに写す前提なので1200pxでも余裕がある。
+  // ピクセル数は約56%になり、縮小後の一時メモリもその分減る。
+  var DECODE_MAX_PX = 1200;
+
+  // 撮れた写真の素性（種類・大きさ）を人が読める形にする。メモリ不足などで失敗した時に
+  // 画面へ出して原因を切り分けるためのもの。ファイル名・中身は出さない（個人情報を含まないため種類と容量のみ）。
+  function fileMeta_(file) {
+    if (!file) return '不明';
+    var mb = (file.size || 0) / 1048576;
+    var type = file.type || '種類不明';
+    return type + ' / ' + (mb >= 1 ? mb.toFixed(1) + 'MB' : Math.round((file.size || 0) / 1024) + 'KB');
+  }
+
+  // 縮小済みcanvasを1枚作る。使い終わったら releaseCanvas_ で必ず解放すること。
+  function makeDecodeCanvas_(file, maxPx) {
+    function drawCapped(source, w, h) {
+      if (!w || !h) throw new Error('写真を読み込めませんでした');
+      // createImageBitmapのresizeWidthは幅しか見ないため、縦長写真は高さが残る。ここで長辺を締める。
+      var s = Math.min(1, maxPx / Math.max(w, h));
+      var c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(w * s));
+      c.height = Math.max(1, Math.round(h * s));
+      c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
+      return c;
+    }
+    function viaImage() {
+      return new Promise(function (resolve, reject) {
+        var url = URL.createObjectURL(file);
+        var img = new Image();
+        img.onload = function () {
+          URL.revokeObjectURL(url);
+          try {
+            var c = drawCapped(img, img.naturalWidth, img.naturalHeight);
+            img.src = ''; // 参照を切って原寸ピクセルを早く解放させる
+            resolve(c);
+          } catch (e) { reject(e); }
+        };
+        img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('写真を読み込めませんでした')); };
+        img.src = url;
+      });
+    }
+    if (typeof createImageBitmap !== 'function') return viaImage();
+    // resizeQualityは 'low' を使う。'high' は高品質な補間のために作業用のバッファを余分に確保する。
+    // QRの解読に絵の滑らかさは要らないので、メモリを優先する。
+    return createImageBitmap(file, { resizeWidth: maxPx, resizeQuality: 'low' })
+      .then(function (bmp) {
+        // 既に上限内なら canvas を作らず ImageBitmap のまま返す。
+        // canvasを作ると「縮小画像2枚分」が同時にメモリへ載るため、非力な端末ではそれも惜しい。
+        if (bmp.width <= maxPx && bmp.height <= maxPx) return bmp;
+        var c;
+        try { c = drawCapped(bmp, bmp.width, bmp.height); }
+        finally { try { bmp.close(); } catch (e) {} }
+        return c;
+      })
+      .catch(function () {
+        // 一段小さくしてもう一度だけ試す（原寸展開でメモリが尽きる端末向けの最後の手）。
+        return createImageBitmap(file, { resizeWidth: Math.round(maxPx / 2), resizeQuality: 'low' })
+          .catch(function () { return viaImage(); }); // resizeオプション未対応の古い実装向け
+      });
+  }
+
+  // makeDecodeCanvas_ の戻り値は canvas か ImageBitmap のどちらか（上を参照）。
+  // 以降の3つは、どちらが来ても同じように扱えるようにするための小道具。
+  function isCanvas_(x) { return !!(x && typeof x.getContext === 'function'); }
+
+  // 裏に確保されたピクセルを手放す。canvasは0×0に、ImageBitmapはclose()。
+  function releaseCanvas_(x) {
+    try {
+      if (!x) return;
+      if (isCanvas_(x)) { x.width = 0; x.height = 0; }
+      else if (typeof x.close === 'function') { x.close(); }
+    } catch (e) {}
+  }
+
+  // ライブラリ・アップロードはcanvasを要求するため、ImageBitmapならここでcanvas化する。
+  function asCanvas_(x) {
+    if (isCanvas_(x)) return x;
+    var c = document.createElement('canvas');
+    c.width = x.width; c.height = x.height;
+    c.getContext('2d').drawImage(x, 0, 0);
+    try { x.close(); } catch (e) {} // 元は即座に手放す（2枚同時に持たない）
+    return c;
+  }
+
+  function canvasToJpegFile_(source, name) {
+    return new Promise(function (resolve, reject) {
+      try {
+        var canvas = asCanvas_(source);
+        canvas.toBlob(function (blob) {
+          releaseCanvas_(canvas);
+          if (!blob) { reject(new Error('画像を変換できませんでした')); return; }
+          resolve(new File([blob], name, { type: 'image/jpeg' }));
+        }, 'image/jpeg', 0.9);
+      } catch (e) { reject(e); }
+    });
+  }
+
+  function decodeQrFromFile(file) {
+    // 【2026-07-23】どこで止まったかが画面から分かるように段階を出す。
+    // 「読み取り中…」のまま無言で固まると、原因を推測でしか語れなくなるため。
+    var meta = fileMeta_(file);
+    function stage(n, what) { scanStatus('読み取り中 ' + n + '/3：' + what + '（' + meta + '）', 'info'); }
+
+    var canvas = null;
+    stage(1, '写真を開く');
+    return makeDecodeCanvas_(file, DECODE_MAX_PX).then(function (c) {
+      canvas = c;
+      stage(2, '端末の読み取り機能');
+      return getBarcodeDetector();
+    }).then(function (bd) {
+      if (!bd) return null;
+      // BarcodeDetectorはcanvasをそのまま受け取れる（原寸fileを再展開しない）。
+      // detect自体も返らないことがあるため時間を切る（上のwithTimeout_のコメント参照）。
+      return withTimeout_(bd.detect(canvas).then(function (codes) {
+        if (codes && codes.length && codes[0].rawValue) return codes[0].rawValue;
+        return null;
+      }), 6000, null);
+    }).then(function (text) {
+      if (text) { releaseCanvas_(canvas); canvas = null; return text; }
+      // 見つからない／BarcodeDetector非対応・無応答 → ライブラリで再試行。ここでも原寸fileは使わず、
+      // 縮小済みcanvasから作った小さなJPEGを渡す（二度目の原寸展開をしないため）。
+      stage(3, '読み取りライブラリ');
+      return canvasToJpegFile_(canvas, 'scan.jpg').then(function (small) {
+        releaseCanvas_(canvas); canvas = null;
+        return decodeWithLib(small);
+      });
+    }).then(function (text) {
+      if (!text) throw new Error('QRを読み取れませんでした');
+      return text;
+    }).catch(function (e) {
+      releaseCanvas_(canvas); canvas = null;
+      throw e;
+    });
+  }
+
+  // 【2026-07-23】2件目以降タップ0: 「登録して次へ」のタップで得たユーザー操作文脈は約5秒持続する
+  // （ヘッドレスChrome実測: 4.5秒後=有効/5.5秒後=失効。非同期RPC完了後の1.5秒/3秒でカメラ起動成功、6秒で失敗）。
+  // 登録RPCが5秒以内に返れば、その延長で次のQR撮影カメラを自動起動できる＝タップ0。
+  // 失効していた場合は何も起きず、背後の待受（画面全体が撮影ボタン）が見えている＝1タップに留まる。
+  function autoNextScan() {
+    // ページ内カメラ方式では操作文脈は関係ない（アプリを切り替えないため）。そのまま次のQR撮影を開く。
+    if (camMode === 'inpage') { startLiveCamera('qr'); return; }
+    var input = document.getElementById('still-scan-input');
+    markCameraPending_();
+    try { input.showPicker(); }            // 失効時はNotAllowedError→
+    catch (e) { try { input.click(); } catch (e2) {} } // click()は未対応環境の保険（失効時は無音で何もしない）
+  }
+
+  // ================= 【2026-07-23追加】ページ内カメラ方式（getUserMedia） =================
+  // なぜ: オーナーのOppo端末では、OSカメラ（capture属性）で撮っても写真がページに返らない
+  //       （Androidがカメラアプリ前面中にブラウザ／カメラを終了させるため。JSでは防げない）。
+  //       ページ内で映像を出してその場で撮ればアプリを切り替えない＝この問題が構造的に起きない。
+  // 位置づけ: OSカメラ方式の"置換ではなく追加"。既定はOSカメラのまま（Galaxyでは正常・速い）。
+  // 停止の約束: 撮影完了・やめる・待受へ戻る・画面非表示・離脱で必ず track.stop() する（stopLiveCamera）。
+  var CAM_MODE_KEY = 'quickreg_cam_mode';   // 'os'（既定）| 'inpage'。端末ごとの保存。トークンは保存しない
+  var camMode = (function () {
+    try { return localStorage.getItem(CAM_MODE_KEY) === 'inpage' ? 'inpage' : 'os'; }
+    catch (e) { return 'os'; }
+  })();
+  var liveStream = null;      // MediaStream（生きている間だけ非null）
+  var livePurpose = null;     // 'qr' | 'photo'
+  var liveStarting = false;
+
+  function renderCamModeUi() {
+    var now = document.getElementById('cam-mode-now');
+    var btn = document.getElementById('cam-mode-btn');
+    var label = document.getElementById('still-stage-label');
+    if (camMode === 'inpage') {
+      now.innerHTML = '撮影方式: <b>ページ内カメラ</b><br>この画面の中で撮ります（アプリを切り替えません）';
+      btn.textContent = 'OSカメラに戻す';
+      if (label) label.textContent = 'タップしてカメラを開く';
+    } else {
+      now.innerHTML = '撮影方式: <b>OSカメラ</b><br>撮っても写真が返ってこない端末は右で切り替え';
+      btn.textContent = 'ページ内カメラで撮る';
+      if (label) label.textContent = 'タップしてQRを撮影';
+    }
+  }
+  window.toggleCamMode = function () {
+    stopLiveCamera();
+    camMode = (camMode === 'inpage') ? 'os' : 'inpage';
+    try { localStorage.setItem(CAM_MODE_KEY, camMode); } catch (e) {}
+    renderCamModeUi();
+    scanStatus(camMode === 'inpage'
+      ? 'ページ内カメラに切り替えました。次の撮影からこの画面の中で撮ります（この端末では次回以降もこの方式です）。'
+      : 'OSカメラに戻しました。次の撮影から端末のカメラアプリが開きます。', 'ok');
+  };
+
+  // 待受の全面ボタン＝方式に応じた撮影開始
+  window.startScan = function () {
+    if (busy || entryOpen) return;
+    if (camMode === 'inpage') { startLiveCamera('qr'); return; }
+    markCameraPending_();
+    document.getElementById('still-scan-input').click();
+  };
+
+  // getUserMediaが使えるか（HTTPS＋対応ブラウザ）。使えない理由を日本語で返す（使えるならnull）
+  function liveUnsupportedReason_() {
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+      return 'このブラウザはページ内カメラに対応していません';
+    }
+    if (!window.isSecureContext) return 'この接続ではページ内カメラを使えません（https でお開きください）';
+    return null;
+  }
+  function liveFallbackHint_() {
+    return '　下の「OSカメラに戻す」で従来方式に戻せます。QRは「IDを手入力」でも先へ進めます。';
+  }
+
+  function startLiveCamera(purpose) {
+    if (liveStarting) return;
+    var ng = liveUnsupportedReason_();
+    if (ng) { liveFail_(ng); return; }
+    if (liveStream) { livePurpose = purpose; showLiveUi_(purpose); return; } // 既に生きていれば使い回す
+    liveStarting = true;
+    livePurpose = purpose;
+    scanStatus('カメラを起動中…', 'info');
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } },
+      audio: false
+    }).then(function (stream) {
+      liveStarting = false;
+      liveStream = stream;
+      var v = document.getElementById('live-video');
+      v.srcObject = stream;
+      var p = v.play();
+      if (p && typeof p.catch === 'function') p.catch(function () {});
+      scanStatus('', '');
+      showLiveUi_(purpose);
+    }).catch(function (err) {
+      liveStarting = false;
+      stopLiveCamera();
+      var name = (err && err.name) || '';
+      var msg;
+      if (name === 'NotAllowedError' || name === 'SecurityError') {
+        msg = 'カメラの使用が許可されていません。ブラウザのアドレスバー左の鍵マークから'
+            + 'このサイトのカメラを「許可」にして、もう一度お試しください。';
+      } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') {
+        msg = 'この端末で使えるカメラが見つかりませんでした。';
+      } else if (name === 'NotReadableError' || name === 'TrackStartError') {
+        msg = 'カメラを他のアプリが使用中のようです。ほかのカメラアプリを閉じてもう一度お試しください。';
+      } else {
+        msg = 'ページ内カメラを起動できませんでした（' + (name || '原因不明') + '）。';
+      }
+      liveFail_(msg);
+    });
+  }
+  // 起動失敗の共通処理: 必ず日本語で理由を出し、逃げ道（OSカメラ・手入力）を示す。無言で止まらない。
+  function liveFail_(msg) {
+    showLiveUi_(null);
+    var full = msg + liveFallbackHint_();
+    if (entryOpen) { entryStatus(full, 'err'); }
+    else {
+      scanStatus(full, 'err');
+      var d = document.getElementById('manual-details');
+      if (d) d.setAttribute('open', ''); // 手入力の逃げ道をその場で開いておく
+    }
+  }
+
+  function showLiveUi_(purpose) {
+    var hint = document.getElementById('live-hint');
+    if (purpose) {
+      hint.textContent = (purpose === 'qr')
+        ? 'QRラベルを枠いっぱいに写してシャッター'
+        : '商品全体が入るように写してシャッター';
+      document.body.classList.add('camlive');
+      document.getElementById('live-shutter').disabled = false;
+    } else {
+      document.body.classList.remove('camlive');
+    }
+  }
+
+  // カメラを必ず止める（トラック停止＝端末のカメラランプが消える）。何度呼んでも安全。
+  function stopLiveCamera() {
+    var v = document.getElementById('live-video');
+    try {
+      if (liveStream) {
+        liveStream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
+      }
+    } catch (e) {}
+    liveStream = null;
+    livePurpose = null;
+    try { if (v) { v.pause(); v.srcObject = null; } } catch (e) {}
+    showLiveUi_(null);
+  }
+  window.stopLiveCamera_ = stopLiveCamera; // 保守時に手動で止められるように（通常は使わない）
+
+  window.cancelLiveCamera = function () {
+    stopLiveCamera();
+    scanStatus('', '');
+  };
+
+  // 現在のフレームを長辺maxPxに収めたcanvasへ描く（既存の縮小作法に合わせる。解放はreleaseCanvas_）
+  function captureLiveFrame_(maxPx) {
+    var v = document.getElementById('live-video');
+    var w = v.videoWidth, h = v.videoHeight;
+    if (!w || !h) throw new Error('カメラ映像がまだ届いていません');
+    var s = Math.min(1, maxPx / Math.max(w, h));
+    var c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * s));
+    c.height = Math.max(1, Math.round(h * s));
+    c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+    return c;
+  }
+
+  // シャッター: 用途に応じて既存経路（QR=decodeQrFromFile／写真=uploadPhotoDataUrl）へ渡す。
+  // どちらの経路でも、フレームを取り終えた時点で即カメラを止める（点けっぱなしにしない）。
+  window.liveShutter = function () {
+    if (!liveStream) return;
+    var purpose = livePurpose;
+    var btn = document.getElementById('live-shutter');
+    btn.disabled = true;
+    try { if (navigator.vibrate) navigator.vibrate(20); } catch (e) {}
+    if (purpose === 'photo') {
+      var canvas = null, dataUrl = null;
+      try {
+        canvas = asCanvas_(captureLiveFrame_(UPLOAD_MAX_PX));
+        dataUrl = canvas.toDataURL('image/jpeg', UPLOAD_JPEG_Q);
+      } catch (e) {
+        releaseCanvas_(canvas);
+        stopLiveCamera();
+        entryStatus('写真を取り込めませんでした（' + ((e && e.message) || '原因不明') + '）。'
+          + 'もう一度お試しください。' + liveFallbackHint_(), 'err');
+        return;
+      }
+      releaseCanvas_(canvas);
+      stopLiveCamera();     // ★撮り終えたら必ず停止
+      uploadPhotoDataUrl(dataUrl);
+      return;
+    }
+    // QR: 縮小済みフレームを小さなJPEGにして、既存の解読・照合経路へそのまま流す
+    var qrCanvas = null;
+    try { qrCanvas = captureLiveFrame_(DECODE_MAX_PX); }
+    catch (e) {
+      releaseCanvas_(qrCanvas);
+      stopLiveCamera();
+      scanStatus('カメラ映像を取り込めませんでした。もう一度お試しください。' + liveFallbackHint_(), 'err');
+      return;
+    }
+    canvasToJpegFile_(qrCanvas, 'scan.jpg').then(function (file) {
+      stopLiveCamera();     // ★撮り終えたら必ず停止
+      handleScanFile_(file);
+    }).catch(function () {
+      releaseCanvas_(qrCanvas);
+      stopLiveCamera();
+      scanStatus('写真を作れませんでした。もう一度お試しください。' + liveFallbackHint_(), 'err');
+    });
+  };
+
+  renderCamModeUi();
+
+  window.manualStart = function () {
+    var id = (document.getElementById('manual-id').value || '').trim();
+    if (!id) { scanStatus('マスターIDを入力してください', 'err'); return; }
+    if (busy || entryOpen) return;
+    resolveLabel(id);
+  };
+
+  // 撮影（唯一の読み取り経路）: タップでOSカメラ→静止画からデコード→照合へ。
+  // 解読はBarcodeDetector優先・無ければ/読めなければライブラリを遅延読み込みしてscanFile
+  // （非表示div still-decode-work に一時インスタンス＝admin.htmlの従来方式と同じパターン）。
+  window.onStillScanPhoto = function (evt) {
+    clearCameraPending_(); // 写真が戻った＝ページは生き残った
+    var file = evt.target.files && evt.target.files[0];
+    evt.target.value = ''; // 同じ写真を選び直してもchangeが発火するようにリセット
+    if (!file) return;
+    handleScanFile_(file);
+  };
+
+  // 撮れた1枚（OSカメラ／ページ内カメラの共通の出口）→ 解読 → 照合。
+  // 【2026-07-23】ページ内カメラ方式を追加したため、ここを両方式の共通経路として切り出した。
+  function handleScanFile_(file) {
+    if (busy || entryOpen) return;
+    // 【2026-07-23】撮れた写真の種類と容量を必ず出す。メモリ不足で落ちる端末の切り分けに要る
+    //（どれだけ大きな写真が来ているのかが分からないと、原因を推測で語ることになるため）。
+    // 【2026-07-23】全体にも時間を切る。個々の段階に時間を切っていても、想定外の場所で
+    // 止まれば画面は無言のままになる。何が起きても必ず結果を出す、を最後に保証する。
+    var wrapped = decodeQrFromFile(file).then(
+      function (text) { return { ok: true, text: text }; },
+      function (err) { return { ok: false, msg: (err && err.message) || 'QRを読み取れませんでした' }; }
+    );
+    withTimeout_(wrapped, 30000, { ok: false, msg: '30秒たっても読み取りが終わりませんでした' })
+      .then(function (res) {
+        scanStatus('', '');
+        if (res.ok) {
+          if (busy || entryOpen) return;
+          try { if (navigator.vibrate) navigator.vibrate(40); } catch (e) {}
+          resolveLabel(res.text);
+          return;
+        }
+        toast(res.msg + '（' + fileMeta_(file) + '）。もう一度撮るか、下のID手入力をお使いください', 'err');
+      });
+  }
+
+  function resolveLabel(rawText) {
+    busy = true;
+    scanStatus('照合中…', 'info');
+    rpc('resolvePreissueToken', { rawText: rawText }).then(function (res) {
+      busy = false;
+      scanStatus('', '');
+      if (res && res.status === 'void') {
+        toast('このラベルは「無効」です。別のラベルをどうぞ', 'err'); return;
+      }
+      if (!res || res.status === 'unknown' || res.status === 'used') {
+        toast('先行発行リストに見つかりません。ラベルとIDを確認してください', 'err'); return;
+      }
+      if (res.status === 'registered') {
+        toast((res.masterId || '') + ' は登録済みです。次のQRをどうぞ', 'err'); return;
+      }
+      openEntry(res.masterId, res.token); // status === 'unused'
+    }).catch(function (err) {
+      busy = false;
+      scanStatus('', '');
+      if (isTokenDeadError(err.message)) { showFatal('続行できません', tokenDeadHint_(err.message), false); return; }
+      toast('照合エラー: ' + err.message, 'err');
+    });
+  }
+
+  // ---- ID確定 → 入力シート ----
+  function openEntry(masterId, preToken) {
+    entryGen++;                 // 別の品に移った＝前の品の遅延応答はもう画面に触らせない
+    currentMasterId = masterId;
+    currentPreToken = preToken;
+    currentFolderUrl = null;
+    photoCount = 0; uploading = false; submitting = false;
+    document.getElementById('id-pill').textContent = masterId;
+    document.getElementById('photo-area').innerHTML = '';
+    document.getElementById('price').value = '';
+    var priceDetails = document.getElementById('price-details');
+    if (lastPriceOpen) { priceDetails.setAttribute('open', ''); }
+    else { priceDetails.removeAttribute('open'); }
+    // 補足メモは品ごとに必ずクリア（前の品の記述が次の品へ混入しないこと。保管場所の前回値保持とは逆仕様）
+    document.getElementById('correction-note').value = '';
+    document.getElementById('correction-details').removeAttribute('open');
+    document.getElementById('manual-id').value = '';
+    entryStatus('', '');
+    // 品を始める前に「もう始めない方がよい」と伝える（ここならまだ何も失っていない）
+    var rEntry_ = remainMs();
+    if (rEntry_ > 0 && rEntry_ < ENTRY_WARN_MS) {
+      entryStatus('まもなく期限です（残り' + Math.ceil(rEntry_ / 60000) + '分）。'
+        + 'この品は、先に開き直してから撮ってください。'
+        + '期限が切れると写真だけ残って登録できません。', 'err');
+    }
+    toast('', '');
+    var locSel = document.getElementById('location');
+    locSel.value = lastLocation || '';
+    syncLocationLabel();
+    var locDetails = document.getElementById('location-details');
+    if (!lastLocation) { locDetails.setAttribute('open', ''); } else { locDetails.removeAttribute('open'); }
+    entryOpen = true;
+    document.body.classList.add('entry');
+    syncUi();
+  }
+
+  function resetToStandby(afterSuccess) {
+    entryGen++;       // 待受へ戻った＝この品の遅延応答はもう画面に触らせない
+    stopLiveCamera(); // 待受へ戻る時点でページ内カメラは必ず止める（autoNextScanが必要なら開き直す）
+    currentMasterId = null; currentPreToken = null; currentFolderUrl = null;
+    photoCount = 0; uploading = false; submitting = false;
+    entryOpen = false;
+    document.body.classList.remove('entry');
+    entryStatus('', '');
+    syncUi();
+  }
+
+  // ---- 写真1枚（長辺2000px・JPEG0.82。canvas再エンコード＝EXIFなし） ----
+  // OS標準カメラ（ファイル撮影・capture）から取得。
+  // 【2026-07-23】drawToJpeg は撤去。原寸を new Image() で展開してから縮小する作りで、
+  // 大きな写真の端末でメモリ不足を起こしていた。縮小しながらデコードする makeDecodeCanvas_ に一本化。
+  var UPLOAD_MAX_PX = 2000, UPLOAD_JPEG_Q = 0.82;
+  window.takePhoto = function () {
+    if (!currentMasterId || uploading) return;
+    // 期限ぎわは撮らせない（撮ると写真だけ残って登録できない＝現物が在庫から消える）
+    var r_ = remainMs();
+    if (r_ > 0 && r_ < PHOTO_MIN_MS) {
+      entryStatus('残り時間が足りません（あと' + Math.max(1, Math.ceil(r_ / 1000)) + '秒）。'
+        + 'いま撮ると、写真だけ残って登録できなくなります。'
+        + 'このタブを閉じ、管理画面のタブを一度「再読み込み」してから開き直してください。', 'err');
+      return;
+    }
+    // 【2026-07-23】ページ内カメラ方式なら同じカメラを使い回してその場で撮る（→liveShutter）
+    if (camMode === 'inpage') { startLiveCamera('photo'); return; }
+    // OS標準カメラで撮影→onEntryPhotoFileへ
+    markCameraPending_();
+    document.getElementById('photo-file-input').click();
+  };
+  // 商品写真: 撮ったファイルを読み込み→リサイズ→アップロード経路へ
+  // 【2026-07-23変更】ここも原寸展開をやめる。QR解読と同じ makeDecodeCanvas_ を使い、
+  // 縮小済みcanvasを直接JPEGへ書き出す（new Image()で原寸を展開しない＝メモリ不足を避ける）。
+  window.onEntryPhotoFile = function (evt) {
+    clearCameraPending_(); // 写真が戻った＝ページは生き残った
+    var file = evt.target.files && evt.target.files[0];
+    evt.target.value = '';
+    if (!file || !currentMasterId || uploading) return;
+    // 🔴【2026-07-26・Codex指摘】リサイズ（makeDecodeCanvas_）は時間がかかるのに、
+    //   以前はこの間 uploading=false のままだった。そのため
+    //   「処理中に←→次の品→処理が終わって前の品の写真が今の品のフォルダへ入る」が起きえた。
+    //   前処理も「作業中」として扱う＝←の確認も beforeunload も効くようにする。
+    var gen = entryGen;
+    uploading = true;
+    syncUi();
+    entryStatus('写真を処理中…', 'info');
+    makeDecodeCanvas_(file, UPLOAD_MAX_PX).then(function (source) {
+      var canvas = asCanvas_(source), dataUrl;
+      try { dataUrl = canvas.toDataURL('image/jpeg', UPLOAD_JPEG_Q); }
+      finally { releaseCanvas_(canvas); }
+      if (gen !== entryGen) return;   // 既に別の品へ移っている＝この写真は捨てる（送らない）
+      uploadPhotoDataUrl(dataUrl, gen);
+    }).catch(function () {
+      if (gen !== entryGen) return;
+      uploading = false;
+      syncUi();
+      entryStatus('写真を処理できませんでした（' + fileMeta_(file) + '）。'
+        + 'カメラアプリの写真サイズを下げると通ることがあります。', 'err');
+    });
+  };
+  function uploadPhotoDataUrl(dataUrl, gen) {
+    if (typeof gen !== 'number') gen = entryGen;
+    uploading = true;
+    syncUi();
+    entryStatus('写真をアップロード中…', 'info');
+    var imgTag = document.createElement('img');
+    imgTag.src = dataUrl;
+    document.getElementById('photo-area').appendChild(imgTag);
+    var filename = currentMasterId + '_live_' + Date.now() + '.jpg';
+    rpc('uploadProductImage', {
+      masterId: currentMasterId, filename: filename, base64Data: dataUrl, mimeType: 'image/jpeg'
+    }).then(function (res) {
+      // 🔴 別の品へ移った後に届いた応答で、currentFolderUrl と photoCount を触らない。
+      //    ここを触ると「今の品」が他人のフォルダURLと偽の枚数を持ったまま登録されてしまう。
+      if (gen !== entryGen) return;
+      uploading = false;
+      currentFolderUrl = res && res.folderUrl ? res.folderUrl : currentFolderUrl;
+      photoCount++;
+      // 成功文言は出さない（バッジ「✓準備完了」＋登録ボタン活性で足りる。シート内の縦消費を抑える）
+      entryStatus('', '');
+      syncUi();
+    }).catch(function (err) {
+      // トークン自体が死んだ場合だけは、古い世代から届いてもページ全体の問題なので通す
+      if (isTokenDeadError(err.message)) { showFatal('続行できません', tokenDeadHint_(err.message), false); return; }
+      if (gen !== entryGen) return;   // 失敗応答でも、今の品の uploading を勝手に戻さない
+      uploading = false;
+      imgTag.remove(); // 失敗した写真のサムネは外す（成功済み分は残す）
+      entryStatus('写真アップロード失敗: ' + err.message + '　もう一度撮ってください。', 'err');
+      syncUi();
+    });
+  };
+
+  // ---- 登録して次へ（既存registerProductと同じdata形＝必須項目・書込み列・既定値は従来ミニUIと同一） ----
+  window.submitRegister = function () {
+    if (submitting) return;
+    if (!currentMasterId) { toast('先にQRを読み取ってください', 'err'); return; }
+    if (uploading) { entryStatus('写真をアップロード中です。完了までお待ちください…', 'info'); return; }
+    if (photoCount < 1) { entryStatus('写真を1枚撮ってください（写真は必須です）', 'err'); return; }
+    var location = document.getElementById('location').value;
+    if (!location) {
+      document.getElementById('location-details').setAttribute('open', '');
+      entryStatus('保管場所を選んでください（初回のみ。次回からは自動で入ります）', 'err');
+      return;
+    }
+    var data = {
+      masterId: currentMasterId,
+      // token＝resolvePreissueTokenで受け取った値をそのまま返送する（2026-07-22・第4R監査修正1）。
+      // サーバはresolve時に記録した束縛（セッション×マスターID×QR埋込トークン）と照合し、書込みには
+      // サーバ記録値を使う＝ここで別の値を入れても通らない。束縛が無い/不一致なら「QRを読み直して
+      // ください」エラーになるので、←で待受に戻ってラベルを読み直せば復旧する。
+      token: currentPreToken,
+      category: '',
+      folderUrl: currentFolderUrl,
+      storageLocation: location,
+      storePrice: document.getElementById('price').value,
+      stock: '',
+      dimensions: '',
+      shippingSizeClass: '',
+      itemType: '一点物',            // 従来フォームの初期値と同一
+      qrAttached: true,              // 従来フォームの初期値（✓貼付済）と同一
+      catalogVisible: true,          // 従来フォームの初期値（既定=公開・2026-07-19）と同一
+      isLargeItem: false,
+      // 🔴【2026-07-27・オーナー決定】かんたん登録は**既定でネット出品しない**。
+      //   かんたん登録＝原則ネットに出さない品（本・大型・低価格）という方針に合わせる。
+      //   以前は false 固定で、登録した品が全件「出してよい品」として正本に書かれ、
+      //   後日PC側で1000点をかき分けて選び直す作業が発生していた。
+      //   値が '自動' なのは、**オーナーが手で付けた除外（'✓'）と区別する**ため。
+      //   写真2枚以上＋採寸ありになった品は '自動' のものだけ出品候補へ引き上げる
+      //   （手で「出さない」と決めた品は引き上げない）。どちらも除外としては同じに効く。
+      excludeFromNetListing: '自動',
+      legalFlag: '',
+      // 補足メモ（任意・空可）→ マスタ列9「補足・訂正メモ(人間)」。AI補完モードBが最優先で反映
+      correctionNote: document.getElementById('correction-note').value.trim(),
+      purchasePrice: '',
+      purchaseNumber: '',
+      purchaseDate: '',
+      supplier: '',
+      accessories: '',
+      conditionNote: '',
+      parentSetId: '',
+      oldIdEc: '',
+      oldIdYahoo: '',
+      oldIdMercari: ''
+    };
+    submitting = true;
+    syncUi();
+    entryStatus('登録中…', 'info');
+    var doneId = currentMasterId;
+    var gen = entryGen;
+    // 登録が成功したときの共通処理。世代がずれていたら画面には触らず、登録できた事実だけ知らせる。
+    function onRegistered_(shownId, okText) {
+      sessionCount++;
+      lastLocation = location;
+      try { localStorage.setItem(LAST_LOCATION_KEY, location); } catch (e) {}
+      if (gen !== entryGen) { toast(shownId + ' ' + okText, 'ok'); syncUi(); return; }
+      resetToStandby(true);
+      toast(shownId + ' ' + okText, 'ok');
+      autoNextScan(); // 操作文脈が残っていれば次のQR撮影カメラを即起動（タップ0）
+    }
+    rpc('registerProduct', data).then(function (res) {
+      submitting = false;
+      onRegistered_((res && res.masterId ? res.masterId : doneId), '登録✓ 次のQRをどうぞ');
+    }).catch(function (err) {
+      var msg = err.message || '';
+      // 通信断→再送で「既に登録済み」＝初回の登録は成功している（サーバの二重登録ガード）。成功扱いで次へ。
+      if (msg.indexOf('既に登録済み') !== -1) {
+        submitting = false;
+        onRegistered_(doneId, '登録済みを確認✓ 次のQRをどうぞ');
+        return;
+      }
+      // トークン自体が死んだ場合だけは、古い世代から届いてもページ全体の問題なので通す
+      if (isTokenDeadError(msg)) { submitting = false; showFatal('続行できません', tokenDeadHint_(msg), false); return; }
+      if (gen !== entryGen) return;   // 古い品の失敗応答で、今の品の submitting を戻さない
+      submitting = false;
+      entryStatus('登録エラー: ' + msg + '　内容を確認してもう一度「登録して次へ」を押してください。', 'err');
+      syncUi();
+    });
+  };
+
+  // ---- ソフトキーボード対策（iOS: キーボードでlayout viewportは縮まずfixed下部が隠れる） ----
+  // visualViewportの実高に#appを合わせ、下部固定の「登録して次へ」がキーボードの上に出続けるようにする。
+  // キーボードが閉じたら（差が60px未満）元の100dvhへ戻す。
+  if (window.visualViewport) {
+    (function () {
+      var vv = window.visualViewport;
+      var app = document.getElementById('app');
+      function fitToViewport() {
+        if (window.innerHeight - vv.height > 60) {
+          app.style.height = vv.height + 'px';
+          app.style.top = vv.offsetTop + 'px';
+          app.style.bottom = 'auto';
+        } else {
+          app.style.height = ''; app.style.top = ''; app.style.bottom = '';
+        }
+      }
+      vv.addEventListener('resize', fitToViewport);
+      vv.addEventListener('scroll', fitToViewport);
+    })();
+  }
+
+  // ---- 離脱ガード（アップロード・登録送信中のみ。iOS Safariでは効かない場合があるが最終防波堤として） ----
+  window.addEventListener('beforeunload', function (e) {
+    if (uploading || submitting) {
+      var msg = '送信が完了していません。閉じると登録されない場合があります。';
+      e.preventDefault();
+      e.returnValue = msg;
+      return msg;
+    }
+  });
+
+  // ================= 【2026-07-23追加】撮影中にページが落ちたことを検知して知らせる =================
+  // 症状（オーナー実機・Oppo）: 撮影しても「読み取り中」すら出ない＝onStillScanPhotoが呼ばれていない。
+  // Androidはカメラアプリが前面に出ている間ブラウザを背後へ回すため、メモリの厳しい端末では
+  // その間にタブが破棄される。戻るとページは最初から作り直され、撮った写真は渡らない。
+  // これはJS側の縮小処理では防げない（落ちるのは処理が始まる前のため）。
+  // せめて「落ちた」ことを本人に見えるようにし、無言の失敗をなくす。
+  var CAM_PENDING_KEY = 'qreg_camera_pending';
+  window.markCameraPending_ = function () {
+    try { sessionStorage.setItem(CAM_PENDING_KEY, String(Date.now())); } catch (e) {}
+  };
+  window.clearCameraPending_ = function () {
+    try { sessionStorage.removeItem(CAM_PENDING_KEY); } catch (e) {}
+  };
+  (function detectCameraCrash_() {
+    var t;
+    try { t = sessionStorage.getItem(CAM_PENDING_KEY); } catch (e) { return; }
+    if (!t) return;
+    try { sessionStorage.removeItem(CAM_PENDING_KEY); } catch (e) {}
+    // 5分以上前の取り残しは無関係（単に閉じただけ等）とみなす
+    if (Date.now() - Number(t) > 5 * 60 * 1000) return;
+    scanStatus('カメラから戻ったときに、この画面が端末によって作り直されました'
+      + '（＝撮った写真が届いていません）。端末のメモリ不足です。'
+      + '下の「ページ内カメラで撮る」に切り替えてお試しください。', 'err');
+  })();
+
+  // ページが生き残っていても、カメラアプリ側が途中で終了して**何も返さずに戻る**ことがある。
+  // その場合 change は発火せず、上の起動時検知にも掛からない＝画面は無言のまま。
+  // 「カメラから戻ってきたのに、少し待っても写真が届かない」ことをもって検知する。
+  // 【2026-07-23追加】画面が見えなくなった／ページを離れる時は、ページ内カメラを必ず止める。
+  // （カメラのランプが点いたまま残らないこと。ここは手を抜かない＝停止の起点を全部押さえる）
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible') stopLiveCamera();
+  });
+  window.addEventListener('pagehide', function () { stopLiveCamera(); });
+  window.addEventListener('beforeunload', function () { stopLiveCamera(); });
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible') return;
+    var pending;
+    try { pending = sessionStorage.getItem(CAM_PENDING_KEY); } catch (e) { return; }
+    if (!pending) return;
+    setTimeout(function () {
+      var still;
+      try { still = sessionStorage.getItem(CAM_PENDING_KEY); } catch (e) { return; }
+      if (!still) return;             // 写真が届いた＝clearCameraPending_ 済み
+      window.clearCameraPending_();
+      if (busy || entryOpen) return;  // 別処理が進んでいるなら黙る
+      scanStatus('カメラから写真が返ってきませんでした（端末側でカメラが終了した可能性）。'
+        + '下の「ページ内カメラで撮る」に切り替えてお試しください。', 'err');
+    }, 1500);
+  });
+
+  // 価格の欄を開いた／閉じたを覚える（次の品を同じ状態で出す）
+  (function () {
+    var pd = document.getElementById('price-details');
+    if (!pd) return;
+    pd.addEventListener('toggle', function () {
+      lastPriceOpen = pd.hasAttribute('open');
+      try { localStorage.setItem(PRICE_OPEN_KEY, lastPriceOpen ? '1' : '0'); } catch (e) {}
+    });
+  })();
+
+  syncUi();
+
+  // 🔴【2026-07-29 オーナー指示】「新規登録ボタン→カメラに直飛び」。
+  //    今までは開いた先が「タップしてQRを撮影」の待受で、1タップ余分に要った。
+  //
+  //    ⚠️ ブラウザの制約: カメラを開くには**ユーザーの操作**が要る。管理画面でボタンを
+  //       押した操作は、ページが変わると引き継がれない。だから完全な「直飛び」は
+  //       どうやっても作れない。**できるのは次の2つ**:
+  //       ① ページ内カメラ方式で、**一度許可した端末**なら操作なしで開ける（getUserMediaは
+  //          許可済みなら再要求しない）→ 実質「直飛び」になる
+  //       ② OSカメラ方式は showPicker() を試すが、操作文脈が無ければ**無音で何も起きない**
+  //          （＝従来どおり待受が見えるだけ。害はない）
+  //    2件目以降は autoNextScan() が既にタップ0を実現している（登録操作の文脈を5秒使う）。
+  (function autoFirstScan_() {
+    if (camMode !== 'inpage') return;   // OSカメラ方式では操作なしに開けない＝待受のまま
+    // 許可済みかを先に見る（未許可でいきなり要求すると、許可ダイアログが出て逆に手が増える）
+    if (!navigator.permissions || !navigator.permissions.query) return;
+    navigator.permissions.query({ name: 'camera' }).then(function (st) {
+      if (st.state === 'granted') {
+        try { startLiveCamera('qr'); } catch (e) { /* 失敗しても待受が見えるだけ */ }
+      }
+    }).catch(function () { /* permissions APIが無い端末は待受のまま＝害はない */ });
+  })();
+})();
+</script>
+</body>
+</html>

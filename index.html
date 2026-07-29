@@ -3,90 +3,569 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>アンティーク家具たかはし</title>
+<meta name="theme-color" content="#7c6a4f">
+<meta name="robots" content="noindex, nofollow">
+<title>アンティーク家具たかはし｜商品カタログ</title>
+<!-- 🔴【2026-07-29】値段が出るまでが HTML→JSON→画像 の**直列**だった（実測0.80〜0.83秒）。
+     ・preconnect: 画像置き場への接続（DNS+TCP+TLS、実測0.027〜0.044秒）をJSON取得と重ねる
+     ・preload:    HTMLを読み終える前にJSONを取りに行かせる
+     ・icon:       指定が無いと /favicon.ico を毎回叩いて404（1往復の無駄） -->
+<link rel="preconnect" href="https://lh3.googleusercontent.com" crossorigin>
+<link rel="preload" as="fetch" href="data.json" crossorigin>
+<link rel="icon" href="data:,">
 <!--
-  QRラベルの中継。公開先: https://qr.antiquekagu-takahashi.com/
+  ===========================================================================
+  自社ドメインだけで完結する表示用カタログ
+  2026-07-29 オーナー承認。GAS版（qr_inventory/catalog-app/）とは**並行運用**。
 
-  🔴 なぜこの1枚を挟むのか（docs/qr-url-policy.md）
-     印刷したQRのURLは**二度と変えられない**（ラベルは何年も貼りっぱなし）。
-     行き先を直接焼き込むと、その行き先が使えなくなった日にラベルが全部死ぬ。
-     実際、自社ECのドメイン(antique-takahashi.com)はDNSがEC事業者(iFLAG)配下で、
-     **EC契約が切れるとネームサーバーごと止まる**。今の518枚がEC契約と無関係に
-     生きているのは、GAS直リンクだったから。
+  🔴 このファイル1本が**2か所**に置かれる（原本はここ・qr_inventory/catalog-site/index.html）
+     ① https://www.antique-takahashi.com/docs/catalog/   … 自社ECのサーバ（FTP）
+     ② https://qr.antiquekagu-takahashi.com/             … GitHub Pages（②が本命）
+     ②へ移すのは、①のドメインのDNSが**EC事業者(iFLAG)配下**で、EC契約が切れると
+     ネームサーバーごと止まるため（docs/existing-site-constraints.md §7）。
+     ②はオーナー名義・Squarespace管理で、EC契約と無関係に生き続ける。
+     ＝ **置き場を移すだけで、カタログがEC契約から独立する。**
 
-     → **当社が握るドメインに、行き先を後から変えられる1枚を置く。**
-       ラベルに焼くのはこのURLだけ。裏側（自社EC→将来の別基盤）が変わっても、
-       ここを書き換えれば**印刷済みQRは生き続ける**。
+  🔴 ②では、このページが**中継ページの役割も兼ねる**（1ホップ減る）。
+     以前は qr.antiquekagu… に別の中継HTMLを置き、そこから①へ飛ばしていた。
+     中継が持っていた「トークンが無い／形が違うときの案内」は
+     notIdentifiedHtml() として**このページが引き継いでいる**（行き止まりを作らない）。
+     パス形式 `/<32桁>` の受けは 404.html（GitHub Pages専用）。
 
-  ⚠️ このページの置き場（GitHub Pages）はいつでも変えてよい。
-     変えてはいけないのは **qr.antiquekagu-takahashi.com というURLの方**。
-     ラベルに焼かれているのはそちらで、置き場は焼かれていない。
+  🔴 なぜあるか
+     オーナーのiPhone Safari（通常ウィンドウ）で GASのカタログURLが**すべて開けない**。
+     Googleが /macros/u/1/s/… へ書き換え、そのパスが404になる。
+     プライベートブラウズ・curl・PC版Chromeでは開けるので**条件が特定できない**＝
+     客の一部で同じことが起きる可能性を消せない。だから表示経路からGoogleを外した。
+     （あわせて、GASのページに毎回出る「不正行為を報告」の帯も無くなる）
 
-  🔴 行き先を変えるときは、このファイルの TARGET だけを直す。
+  🔴 このページが守る線
+     ・表示にGoogleを一切使わない。読むのは同じフォルダの data.json だけ。
+       写真だけは lh3.googleusercontent.com（CDN直・画像1枚）＝**出なくても値段は出る**。
+     ・**カゴはQRを読んだときだけ**（?t= で開いたときだけ）。一覧を作らない。
+       一点物なので、店外からカゴに入れられると「取り置けた」と受け取られ**二重売却**になる。
+     ・お気に入りは本人確認が要るのでGAS（会員カタログ）のまま。ここからはリンクするだけ。
+     ・印刷済みQRの宛先URLは**GASのまま1文字も変えない**（不変条件4）。これは今も守っている。
+       🔴 ただし**「置き換えではない」はもう成り立たない**（2026-07-29）。
+       GAS側が `?t=` を受けたあとこのページへ転送する分岐が**既定ONで本番稼働**しているので、
+       **印刷済みQRを読んだ客は実際にここへ着地する**（実測: 本番デプロイに実トークンでcurl→転送HTML）。
+       ＝ このページと data.json の鮮度が、**印刷済みQRの客の見え方に直結する**。
+       書き出しを止める・data.json を欠けさせると、客の画面が壊れる。
+
+  🔴 並びはオーナーと詰めて決めたもの。**勝手に変えない**
+     写真148px｜QR+ID → 商品名 → 価格32px → 区切り → 採寸15px → メタ → 説明 → AI注意書き → ボタン
+  ===========================================================================
 -->
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #faf7f2;
+    --panel: #ffffff;
+    --ink: #2f2b26;
+    --sub: #6b6255;
+    --accent: #7c6a4f;
+    --accent-dark: #5b4c37;
+    --line: #e3ddd0;
+    --sold: #a5453a;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { -webkit-text-size-adjust: 100%; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
-    background: #faf7f2; color: #2f2b26; min-height: 100vh;
-    display: flex; align-items: center; justify-content: center;
-    padding: 24px 20px; line-height: 1.9;
+    margin: 0;
+    font-family: "Hiragino Mincho ProN", "Hiragino Sans", "Yu Gothic", "Noto Sans JP", serif;
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 16px;
+    padding: 0 0 40px;
+    overflow-x: hidden;
   }
-  .wrap { width: 100%; max-width: 420px; text-align: center; }
-  .spin {
-    width: 36px; height: 36px; margin: 0 auto 22px;
-    border: 3px solid #e3ddd2; border-top-color: #7c6a4f;
-    border-radius: 50%; animation: r .9s linear infinite;
+  header.shop-header {
+    padding: 28px 20px 20px;
+    text-align: center;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
   }
-  @keyframes r { to { transform: rotate(360deg); } }
-  .t { font-size: 19px; font-weight: 600; margin-bottom: 10px; }
-  .s { font-size: 15px; color: #6b6255; margin-bottom: 26px; }
-  .b {
-    display: block; width: 100%; min-height: 56px; line-height: 56px;
-    background: #7c6a4f; color: #fff; border-radius: 12px;
-    text-decoration: none; font-size: 18px; font-weight: 600;
+  header.shop-header h1 { font-size: 20px; letter-spacing: 0.12em; margin: 0 0 6px; font-weight: 600; }
+  header.shop-header p { font-size: 12px; color: var(--sub); margin: 0; letter-spacing: 0.05em; }
+
+  .detail-wrap { max-width: 640px; margin: 16px auto 0; padding: 0 12px; }
+  .detail-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+  .empty-state { text-align: center; color: var(--sub); font-size: 13px; padding: 60px 20px; line-height: 1.9; }
+
+  /* 並び＝写真｜QR＋ID → 商品名 → 価格。実物が目の前にあるので写真は「一致の確認」に足りればよく正面1枚。
+     価格が主役（値札代わり）＝強い色を使うのはここだけ。 */
+  .d-top { display: flex; align-items: flex-start; gap: 11px; margin: 0 0 12px; }
+  .d-photo {
+    width: 148px; height: 148px; flex: none; border-radius: 6px; object-fit: cover;
+    border: 1px solid var(--line); background: #efe9dd; cursor: zoom-in;
   }
-  .ng { font-size: 15px; color: #6b6255; }
+  .d-photo.na { background: repeating-linear-gradient(45deg,#eee9df 0 8px,#e6e0d3 8px 16px); }
+  .d-side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+  .d-qr { display: flex; align-items: center; gap: 8px; }
+  .d-id { font-size: 11px; color: var(--sub); letter-spacing: .1em; font-family: ui-monospace, Consolas, monospace; }
+  .detail-panel .d-side h2 { font-size: 13px; margin: 0; line-height: 1.5; font-weight: 400; overflow-wrap: anywhere; }
+  .detail-panel .d-side .price-line {
+    font-size: 32px; line-height: 1.05; margin: 0; letter-spacing: -.015em; white-space: nowrap;
+    color: var(--accent-dark); font-weight: 600;
+  }
+  .detail-panel .d-side .price-line.sold { color: var(--sold); }
+  .d-sep { border: 0; border-top: 1px solid var(--line); margin: 0 0 11px; }
+  /* 採寸＝置けるかを決める情報。おまけの中でもこれだけは大きく */
+  .d-dim { font-size: 15px; color: var(--ink); font-weight: 600; margin: 0 0 3px; line-height: 1.5; }
+  .d-meta { font-size: 11.5px; color: var(--sub); margin: 0 0 10px; line-height: 1.6; }
+  .desc { font-size: 14px; line-height: 1.9; white-space: pre-wrap; color: var(--ink); }
+  .desc-more { display:inline-block; margin-left:6px; color: var(--accent);
+    text-decoration: underline; cursor: pointer; font-size: 12px; }
+  .ai-note { font-size: 10.5px; color: var(--sub); margin-top: 9px; line-height: 1.55; }
+
+  /* カゴ＝今この場の会計（端末内）／お気に入り＝また来たとき（公式LINE）。目的が違うので別枠 */
+  .d-acts { display: flex; gap: 9px; margin-top: 14px; }
+  .cart-btn {
+    flex: 1; min-height: 48px; border-radius: 22px; font-size: 14.5px; cursor: pointer;
+    font-family: inherit; display: grid; place-items: center; padding: 0 14px; background: #fff;
+    border: 1px solid var(--accent); color: var(--accent-dark);
+  }
+  .cart-btn.on { background: var(--accent); color: #fff; }
+  .cart-btn[disabled] { opacity: .45; cursor: not-allowed; }
+  .fav-btn {
+    display: grid; place-items: center; width: 100%; margin-top: 9px; min-height: 48px;
+    border-radius: 22px; border: 1px solid var(--line); color: var(--sub);
+    background: #fff; font-size: 13px; text-decoration: none;
+  }
+  .fav-why { font-size: 11px; color: var(--sub); line-height: 1.65; margin: 7px 0 0; }
+  .fav-link { color: var(--accent); }
+  .cart-why { font-size: 11px; color: var(--sub); line-height: 1.65; margin: 8px 0 0; }
+  .cart-open {
+    display: grid; place-items: center; width: 100%; margin-top: 9px; min-height: 48px;
+    border-radius: 22px; border: 1px solid var(--accent); background: #fff; color: var(--accent-dark);
+    font-size: 13.5px; font-weight: 600; cursor: pointer; font-family: inherit;
+  }
+
+  /* 🔴 この画面は「書き出した時点の写し」。売れた直後・値段を直した直後は追いつかない。
+     黙って古い値段を出すのは客にも店にも損なので、いつ時点かを必ず添える。 */
+  .stale-note { max-width: 640px; margin: 10px auto 0; padding: 0 14px; font-size: 10.5px;
+    color: var(--sub); line-height: 1.7; text-align: center; }
+
+  /* カゴ（localStorage・端末内・30日）。GAS版とは別ドメインなので中身は共有されない */
+  .cart-wrap { max-width: 640px; margin: 16px auto 0; padding: 0 12px; }
+  .back-link { display: inline-flex; align-items: center; min-height: 48px; margin-bottom: 8px;
+    font-size: 14px; color: var(--accent-dark); text-decoration: none; cursor: pointer; }
+  .cart-title { font-size: 16px; margin: 6px 0 10px; }
+  .cart-total {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+    background: var(--panel); border: 1px solid var(--accent); border-radius: 12px;
+    padding: 13px 16px; margin-bottom: 8px;
+  }
+  .cart-total-label { font-size: 13px; color: var(--sub); }
+  .cart-total-sum { font-size: 28px; font-weight: 600; color: var(--accent-dark);
+    letter-spacing: -.015em; white-space: nowrap; }
+  .cart-total-note { font-size: 11.5px; color: var(--sub); margin: 0 0 10px; line-height: 1.6; }
+  .keep-list-note {
+    font-size: 12px; color: var(--sub); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; line-height: 1.7;
+  }
+  .keep-item {
+    display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 8px; margin-bottom: 8px;
+  }
+  .keep-item-thumb { width: 56px; height: 56px; flex: none; border-radius: 6px; overflow: hidden; background: #efe9dc; }
+  .keep-item-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .keep-item-info { flex: 1; min-width: 0; }
+  .keep-item-info .name { font-size: 13px; margin: 0 0 4px; line-height: 1.5; }
+  .keep-item-info .price { font-size: 13px; color: var(--accent-dark); font-weight: 600; margin: 0; }
+  .keep-item-remove {
+    flex: none; width: 48px; height: 48px; min-width: 48px; min-height: 48px; padding: 0;
+    border-radius: 10px; border: 1px solid var(--line);
+    background: #fff; color: var(--sub); font-size: 18px; line-height: 1;
+    cursor: pointer; font-family: inherit;
+  }
+  .cart-empty { text-align: center; color: var(--sub); font-size: 13px; padding: 34px 14px 24px; line-height: 1.9; }
+  .cart-empty-icon { display: block; font-size: 34px; margin-bottom: 10px; }
+
+  /* タップ拡大 */
+  .lightbox { position: fixed; inset: 0; background: rgba(20,16,10,.93); z-index: 300;
+    display: none; align-items: center; justify-content: center; }
+  .lightbox.open { display: flex; }
+  .lightbox img { max-width: 96vw; max-height: 80vh; object-fit: contain; border-radius: 6px; }
+  .lightbox-btn { position: absolute; top: 10px; right: 14px; background: rgba(255,255,255,.16);
+    color: #fff; border: none; border-radius: 22px; min-height: 44px; padding: 0 18px;
+    font-size: 16px; font-family: inherit; cursor: pointer; }
+
+  .policy-footer { max-width: 640px; margin: 8px auto 0; padding: 0 16px; text-align: center; }
+  /* 指で押す先は48px以上。文字は小さいままでよいので、上下に余白で高さを作る */
+  .policy-footer a { display: inline-block; padding: 15px 12px; font-size: 12px; line-height: 18px;
+    color: var(--sub); text-decoration: underline; }
 </style>
 </head>
 <body>
-  <div class="wrap" id="wrap">
-    <div class="spin" id="spin"></div>
-    <p class="t" id="t">商品ページをひらいています</p>
-    <p class="s" id="s">切り替わらない場合は、下のボタンをタップしてください。</p>
-    <a class="b" id="go" href="#">つづける</a>
+<header class="shop-header">
+  <h1>アンティーク家具たかはし</h1>
+  <p>商品カタログ</p>
+</header>
+
+<div id="view-detail" class="detail-wrap">
+  <div class="empty-state">読み込み中…</div>
+</div>
+<p class="stale-note" id="stale-note" style="display:none;"></p>
+
+<div id="view-cart" class="cart-wrap" style="display:none;">
+  <a class="back-link" onclick="closeCart()">← 戻る</a>
+  <h2 class="cart-title">🧺 カゴ</h2>
+  <div id="cart-total" class="cart-total" style="display:none;">
+    <span class="cart-total-label"><span id="cart-total-count">0点</span>の合計</span>
+    <span class="cart-total-sum" id="cart-total-sum">¥0</span>
   </div>
+  <div id="cart-total-note" class="cart-total-note" style="display:none;"></div>
+  <div class="keep-list-note" id="cart-note">
+    レジで「これ全部で」とお見せするためのカゴです。<strong>お取り置きではありません。</strong><br>
+    この端末に一時保存されます（保存期間の目安は30日）。またのご来店用に残したい品は、
+    商品ページの「☆ お気に入り（公式LINE）」へどうぞ。
+  </div>
+  <div id="cart-body"></div>
+</div>
+
+<div class="policy-footer">
+  <a id="privacy-link" href="#" target="_blank" rel="noopener">プライバシーポリシー</a>
+</div>
+
+<noscript>
+  <div class="detail-wrap"><div class="detail-panel">
+    <p>このページの表示にはJavaScriptが必要です。恐れ入りますが、店頭スタッフにお気軽にお問い合わせください。</p>
+  </div></div>
+</noscript>
+
 <script>
 (function () {
-  // 🔴 行き先。ここだけを直せば、印刷済みQRの行き先が変わる。
-  var TARGET = 'https://www.antique-takahashi.com/docs/catalog/';
+  'use strict';
 
-  // トークンは 32桁の16進（小文字）。admin-app の発番と同じ形式。
-  // 🔴 形が違うものは**行き先へ渡さない**（変な値をそのまま転送しない）。
+  // GAS版カタログ（会員限定＝お気に入り・全商品ブラウズ）。**印刷済みQR518枚の宛先でもある**ので
+  // このURLは変えない。ここからはリンクするだけで、表示には一切使わない。
+  var GAS_EXEC_URL = 'https://script.google.com/macros/s/AKfycbxAOpYw6XwevYwLFEahsEvKJfqkxnACdrtpsWaWSFqWR-ltooiVGfLMBwJe6bABSJN1/exec';
+
+  // 🔴 GAS版と**同じキー**にしてある。中身は共有されない（別ドメインなので別の入れ物）が、
+  //    将来どちらかへ寄せるときに形が同じである方が扱いやすい。
+  var CART_KEY = 'qrcat_keeps_v1';
+  var CART_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30日
+  var DESC_SHORT_MAX = 100;
+
+  var data = null;
+  var item = null;
+  var token = '';
+  // 🔴 「t= が無い」と「t= はあるが形が違う」を区別する。
+  //    前者＝ドメインを直接開いた人（案内を出す）／後者＝QRの読み取りが崩れた人（やり直しを出す）。
+  //    以前は中継ページが後者を受け持っていた（qr-redirect/index.html）。ここが引き継いでいる。
+  var tokenMalformed = false;
+
+  function $(id) { return document.getElementById(id); }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function yen(n) { return '¥' + Number(n).toLocaleString('ja-JP'); }
+
+  // ---- URL ----------------------------------------------------------------
+  // 🔴 トークンの形式は印刷済みQRと同じ32桁16進。形が違うものは**引かない**
+  //    （マスターIDの連番総当たりで引けない設計＝GAS版と同じ）。
   function readToken() {
-    var m = String(window.location.search || '').match(/[?&]t=([0-9a-f]{32})(?:&|$)/i);
-    if (m) return m[1].toLowerCase();
-    // パス形式 /<トークン> にも対応（将来URLを短くしたくなったとき用）
-    var p = String(window.location.pathname || '').match(/\/([0-9a-f]{32})\/?$/i);
-    return p ? p[1].toLowerCase() : '';
+    var m = String(location.search || '').match(/[?&]t=([^&]*)/);
+    var raw = '';
+    try { raw = m ? decodeURIComponent(m[1]) : ''; }
+    catch (e) { raw = m ? String(m[1]) : ''; }   // 壊れた %エンコードでも例外で止めない
+    // 大文字で来ることがある（中継ページも小文字へ寄せていた）。形が合えば受ける。
+    var v = String(raw).toLowerCase();
+    if (/^[0-9a-f]{32}$/.test(v)) return v;
+    // 🔴 t= が有るのに形が違う＝「読めなかった」。t= が無いのとは別に数える。
+    tokenMalformed = !!m;
+    return '';
   }
 
-  var t = readToken();
-  var go = document.getElementById('go');
-
-  if (!t) {
-    // 🔴 行き止まりにしない。QRが読めなかった／古い札のときに、何をすればよいか出す。
-    document.getElementById('spin').style.display = 'none';
-    document.getElementById('t').textContent = '商品が特定できませんでした';
-    document.getElementById('s').innerHTML =
-      'QRコードをもう一度読み取ってみてください。<br>うまくいかないときは、店頭スタッフにお声がけください。';
-    go.style.display = 'none';
-    return;
+  // ---- カゴ（localStorage・端末内） ---------------------------------------
+  function loadCart() {
+    try {
+      var raw = localStorage.getItem(CART_KEY);
+      var list = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(list)) list = [];
+      var now = Date.now();
+      var kept = list.filter(function (it) { return it && it.token && it.ts && (now - it.ts) < CART_MAX_AGE_MS; });
+      if (kept.length !== list.length) saveCart(kept);
+      return kept;
+    } catch (e) { return []; }
+  }
+  function saveCart(list) {
+    try { localStorage.setItem(CART_KEY, JSON.stringify(list)); } catch (e) { /* 容量超過等は無視 */ }
+  }
+  function isKept(t) {
+    var list = loadCart();
+    for (var i = 0; i < list.length; i++) { if (list[i].token === t) return true; }
+    return false;
+  }
+  function toggleCart() {
+    if (!item || !token) return;
+    var list = loadCart(), idx = -1;
+    for (var i = 0; i < list.length; i++) { if (list[i].token === token) { idx = i; break; } }
+    if (idx >= 0) list.splice(idx, 1);
+    else list.push({ token: token, name: item.name || '', price: (item.price != null ? item.price : null),
+                     thumbnail: item.image || '', ts: Date.now() });
+    saveCart(list);
+    renderDetail();
+  }
+  function removeFromCart(t) {
+    var list = loadCart().filter(function (it) { return it.token !== t; });
+    saveCart(list);
+    renderCart();
+  }
+  // 値段の付いていない品は**足さずに件数だけ添える**（黙って0円で足すと嘘になる）
+  function cartTotals(list) {
+    var sum = 0, unpriced = 0;
+    for (var i = 0; i < list.length; i++) {
+      var p = (list[i].price != null && list[i].price !== '') ? Number(list[i].price) : NaN;
+      if (isFinite(p)) sum += p; else unpriced++;
+    }
+    return { count: list.length, sum: sum, unpriced: unpriced };
   }
 
-  var url = TARGET + '?t=' + t;
-  go.href = url;                     // 🔴 自動遷移より先にリンクを入れる（止まっても押せる）
-  try { window.location.replace(url); } catch (e) { /* ボタンで進んでもらう */ }
+  // ---- 説明文 --------------------------------------------------------------
+  // カタログ専用の短文があればそれを出す。無ければ従来の説明を1文目で切って「続きを読む」。
+  function descHtml(it) {
+    var full = String(it.description || '');
+    var short = String(it.catalogDescription || '').trim();
+    if (!full && !short) {
+      return '<div class="desc">商品説明は準備中です。店頭にてお気軽にお問い合わせください。</div>';
+    }
+    if (short) return '<div class="desc">' + escapeHtml(short) + '</div>';
+    var cut = full.indexOf('。');
+    var head = (cut > 0 && cut + 1 <= DESC_SHORT_MAX) ? full.slice(0, cut + 1) : full.slice(0, DESC_SHORT_MAX);
+    if (head.length >= full.length) return '<div class="desc">' + escapeHtml(full) + '</div>';
+    return '<div class="desc" id="desc-box">' + escapeHtml(head) + '…' +
+      '<a class="desc-more" id="desc-more">続きを読む</a></div>' +
+      '<div class="desc" id="desc-full" style="display:none;"></div>';
+  }
+
+  // ---- 画面 ----------------------------------------------------------------
+  function statusInfo(stockStatus) {
+    // 売約済は在庫あり扱い（仮押さえ機能は2026-07-14廃止済み）。SOLDだけを出す。
+    if (stockStatus === 'SOLD') return { label: 'SOLD', cls: 'sold' };
+    return null;
+  }
+
+  function notFoundHtml() {
+    return '<div class="detail-panel"><div class="empty-state">' +
+      'この商品の情報は現在ご覧いただけません。<br>恐れ入りますが、店頭スタッフにお気軽にお問い合わせください。' +
+      '</div></div>';
+  }
+
+  function landingHtml() {
+    return '<div class="detail-panel"><div class="empty-state">' +
+      '店内の商品につけられた<strong>QRコード</strong>をカメラで読み取ると、その商品の詳細が表示されます。<br><br>' +
+      '<a class="fav-link" href="' + escapeHtml(GAS_EXEC_URL) + '?view=members">公式LINEの友だち限定カタログを見る</a>' +
+      '</div></div>';
+  }
+
+  // 🔴 中継ページ（qr-redirect/index.html）から引き継いだ案内。
+  //    QRの読み取りが崩れて `?t=` の中身が壊れたとき、**次の手を必ず示す**（行き止まりにしない）。
+  function notIdentifiedHtml() {
+    return '<div class="detail-panel"><div class="empty-state">' +
+      '<strong>商品が特定できませんでした</strong><br><br>' +
+      'QRコードをもう一度読み取ってみてください。<br>' +
+      'うまくいかないときは、店頭スタッフにお声がけください。' +
+      '</div></div>';
+  }
+
+  function renderDetail() {
+    var box = $('view-detail');
+    $('view-cart').style.display = 'none';
+    box.style.display = '';
+
+    if (!token) { box.innerHTML = tokenMalformed ? notIdentifiedHtml() : landingHtml(); return; }
+    if (!item) { box.innerHTML = notFoundHtml(); return; }
+
+    var st = statusInfo(item.stockStatus);
+    var photo = item.image
+      ? '<img class="d-photo" id="d-photo" src="' + escapeHtml(item.image) + '" alt="商品写真">'
+      : '<div class="d-photo na"></div>';
+
+    var priceHtml = st
+      ? '<div class="price-line ' + st.cls + '">' + st.label + '</div>'
+      : '<div class="price-line">' + (item.price ? yen(item.price) : '価格応談') + '</div>';
+
+    var kept = isKept(token);
+    var cartBtn = '<button type="button" class="cart-btn' + (kept ? ' on' : '') + '" id="cart-btn">' +
+      (kept ? '✓ カゴに入れた' : 'カゴに入れる') + '</button>';
+
+    var totals = cartTotals(loadCart());
+    var cartOpen = totals.count > 0
+      ? '<button type="button" class="cart-open" id="cart-open">🧺 カゴ ' + totals.count + '点 ' +
+        yen(totals.sum) + ' を見る</button>'
+      : '';
+
+    // お気に入りは「誰の」を特定する必要がある＝公式LINEのログインが要るのでGAS側のまま。
+    // ここからはリンクするだけ（開けない端末があることは承知のうえ。値段の表示はそれに依存しない）。
+    var favHtml =
+      '<a class="fav-btn" href="' + escapeHtml(GAS_EXEC_URL) + '?view=members" target="_blank" rel="noopener">' +
+      '☆ お気に入り（公式LINEの会員カタログ）</a>' +
+      '<p class="fav-why">お気に入りは<b>公式LINEのアカウントに残ります</b>ので、端末やブラウザが変わっても消えません。' +
+      '（この画面ではなく、公式LINEの会員カタログでご利用いただけます）</p>';
+
+    box.innerHTML =
+      '<div class="detail-panel">' +
+        '<div class="d-top">' + photo +
+          '<div class="d-side">' +
+            '<div class="d-qr"><span class="d-id">' + escapeHtml(item.masterId || '') + '</span></div>' +
+            '<h2>' + escapeHtml(item.name) + '</h2>' +
+            priceHtml +
+          '</div>' +
+        '</div>' +
+        '<hr class="d-sep">' +
+        (item.dimensions ? '<p class="d-dim">' + escapeHtml(item.dimensions) + '</p>' : '') +
+        (item.category ? '<p class="d-meta">' + escapeHtml(item.category) + '</p>' : '') +
+        descHtml(item) +
+        ((item.description || item.catalogDescription)
+          ? '<p class="ai-note">※この商品説明はAIが写真をもとに作成しています。' +
+            '相違がある場合は、店頭の実物とスタッフのご案内を優先してください。</p>' : '') +
+        '<div class="d-acts">' + cartBtn + '</div>' +
+        favHtml +
+        cartOpen +
+      '</div>';
+
+    var b = $('cart-btn'); if (b) b.onclick = toggleCart;
+    var o = $('cart-open'); if (o) o.onclick = openCart;
+    var more = $('desc-more');
+    if (more) more.onclick = function () {
+      $('desc-full').textContent = String(item.description || '');
+      $('desc-full').style.display = '';
+      $('desc-box').style.display = 'none';
+    };
+    var ph = $('d-photo');
+    if (ph) {
+      ph.onerror = function () { this.style.display = 'none'; };
+      ph.onclick = openLightbox;
+    }
+  }
+
+  function renderCart() {
+    var list = loadCart().slice().reverse(); // 新しく入れたものが上
+    var t = cartTotals(list);
+    if (t.count > 0) {
+      $('cart-total-count').textContent = t.count + '点';
+      $('cart-total-sum').textContent = yen(t.sum);
+      $('cart-total').style.display = '';
+      if (t.unpriced > 0) {
+        $('cart-total-note').textContent =
+          '※ 価格応談の ' + t.unpriced + '点 は合計に含んでいません。店頭スタッフへお声がけください。';
+        $('cart-total-note').style.display = '';
+      } else { $('cart-total-note').style.display = 'none'; }
+    } else {
+      $('cart-total').style.display = 'none';
+      $('cart-total-note').style.display = 'none';
+    }
+    $('cart-note').style.display = (t.count > 0) ? '' : 'none';
+
+    $('cart-body').innerHTML = list.map(function (it) {
+      // 🔴【2026-07-29】枠は56pxなのに、詳細画面で保存した =w1000（1000×1333px）が入っていた。
+      //   通信はブラウザキャッシュに載るが、**1枚あたり5.1MBのビットマップを展開する**ので、
+      //   5点入ったカゴで25MB。レジ前で固まるのはこれ。
+      //   既にlocalStorageへ保存済みの古いURLも**読むときに直す**（会員一覧と同じ手）。
+      var thumbUrl = String(it.thumbnail || '').replace(/=w\d+$/, '=w296');
+      var img = thumbUrl ? '<img src="' + escapeHtml(thumbUrl) + '" alt="" loading="lazy" decoding="async">' : '';
+      var price = (it.price != null && it.price !== '' && isFinite(Number(it.price)))
+        ? yen(it.price) : '価格応談';
+      return '<div class="keep-item">' +
+        '<div class="keep-item-thumb">' + img + '</div>' +
+        '<div class="keep-item-info">' +
+          '<p class="name">' + escapeHtml(it.name) + '</p>' +
+          '<p class="price">' + price + '</p>' +
+        '</div>' +
+        '<button type="button" class="keep-item-remove" data-token="' + escapeHtml(it.token) + '" ' +
+          'aria-label="カゴから外す" title="カゴから外す">✕</button>' +
+        '</div>';
+    }).join('') + (t.count === 0
+      ? '<div class="cart-empty"><span class="cart-empty-icon">🧺</span>カゴは空です。<br>' +
+        '気になる品のQRを読み込んで「カゴに入れる」を押すと、ここに並びます。</div>'
+      : '');
+
+    var btns = $('cart-body').querySelectorAll('.keep-item-remove');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].onclick = function () { removeFromCart(this.getAttribute('data-token')); };
+    }
+  }
+
+  function openCart() {
+    $('view-detail').style.display = 'none';
+    $('view-cart').style.display = '';
+    renderCart();
+    window.scrollTo(0, 0);
+  }
+  function closeCart() { renderDetail(); window.scrollTo(0, 0); }
+  window.closeCart = closeCart;
+
+  function openLightbox() {
+    if (!item || !item.image) return;
+    var lb = $('lightbox');
+    if (!lb) {
+      lb = document.createElement('div');
+      lb.id = 'lightbox';
+      lb.className = 'lightbox';
+      lb.innerHTML = '<button type="button" class="lightbox-btn">閉じる</button><img alt="商品写真">';
+      lb.onclick = function () { lb.classList.remove('open'); document.body.style.overflow = ''; };
+      document.body.appendChild(lb);
+    }
+    // 🔴【2026-07-29】一覧・詳細は表示枠に合わせた小さい画像を配っている（=w296）。
+    //   拡大したときだけ大きいものを取りに行く＝**拡大しない客が大きい画像の代金を払わない**。
+    lb.querySelector('img').src = String(item.image || '').replace(/=w\d+$/, '=w1000');
+    lb.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  // ---- 起動 ----------------------------------------------------------------
+  // 🔴 ここが落ちても「読み込み中…」のまま止めない。**必ず何かを表示して、次の手を示す**。
+  function fail(msg) {
+    $('view-detail').innerHTML = '<div class="detail-panel"><div class="empty-state">' +
+      escapeHtml(msg) + '<br><br>恐れ入りますが、店頭スタッフにお気軽にお問い合わせください。' +
+      '</div></div>';
+  }
+
+  function boot() {
+    token = readToken();
+    $('privacy-link').href = GAS_EXEC_URL + '?view=privacy';
+
+    // 🔴 トークンが無い／形が違うときは data.json を待たない。
+    //    案内を出すのに商品データは要らないので、**data.json が落ちていても案内は出る**。
+    //    （中継ページは何も取りに行かずに案内を出していた。その頑健さを落とさない）
+    if (!token) { renderDetail(); return; }
+
+    // 1分単位のキャッシュ避け。同じ分の間はブラウザのキャッシュが効き、分をまたげば取り直す
+    // （＝書き出し直後の反映が最大1分遅れる代わりに、毎回135KBを落とさない）。
+    // 🔴【2026-07-29修正】`?v=<分>` を付けていたため、**分をまたぐたびに136件を全部取り直して**いた。
+    //   サーバはETagで304（本文0バイト・実測0.06秒）を返せる状態なのに、URLが変わるので成立しなかった。
+    //   店内で5点読む客は 40KB×5 を落としていた。素のURLにすれば2件目以降は0バイト。
+    //   ⚠️ 書き出し直後の反映は「304を返さなくなる＝新しい本文が来る」で自動的に成立する
+    //      （ETagが変わるため）。むしろ今より速く反映される。
+    var url = 'data.json';
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState !== 4) return;
+      if (xhr.status !== 200) { fail('商品情報を読み込めませんでした（通信エラー）。'); return; }
+      try { data = JSON.parse(xhr.responseText); }
+      catch (e) { fail('商品情報を読み込めませんでした。'); return; }
+      item = (token && data && data.items) ? (data.items[token] || null) : null;
+      if (item) item.token = token;
+      renderDetail();
+      if (data && data.generatedAt) {
+        var n = $('stale-note');
+        n.textContent = 'この画面は ' + data.generatedAt + ' 時点の控えです。' +
+          '売却済み・価格変更が反映されていない場合があります。店頭スタッフにご確認ください。';
+        n.style.display = '';
+      }
+    };
+    xhr.onerror = function () { fail('商品情報を読み込めませんでした（通信エラー）。'); };
+    try { xhr.send(); } catch (e) { fail('商品情報を読み込めませんでした。'); }
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
 })();
 </script>
 </body>
