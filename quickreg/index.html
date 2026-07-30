@@ -446,23 +446,10 @@
             <input type="number" id="price" inputmode="numeric" placeholder="例: 7800（空欄OK）" oninput="syncUi()">
           </div>
         </details>
-        <details id="location-details" class="qreg-formrow">
-          <summary>
-            <span class="qreg-form-label">保管場所</span>
-            <b id="qreg-location-label">未選択</b>
-            <span class="qreg-chip-blue qreg-chip">前回値</span>
-            <span class="qreg-chevron">▾</span>
-          </summary>
-          <div class="qreg-form-body">
-            <select id="location" onchange="onLocationChange()">
-              <option value="">選択してください</option>
-              <option value="店舗">店舗</option>
-              <option value="店舗2階">店舗2階（物置）</option>
-              <option value="ガレージ">ガレージ</option>
-              <option value="有楽町">有楽町</option>
-            </select>
-          </div>
-        </details>
+        <!-- 🔴【2026-07-30 オーナー指示】並びは 写真→価格→補足メモ→保管場所。
+             「保管場所をいじり頻度が減るので保管場所は、補足と場所を入れ替えで」
+             ＝初期値を「店舗」に固定したので保管場所はもう毎回触らない。
+             毎回触るもの（価格・補足メモ）を上へ、触らないもの（保管場所）を下へ。 -->
         <!-- 【2026-07-22追加】補足メモ（任意・既定は閉じる＝必須動線を押し出さない）。
              registerProductのdata.correctionNote→マスタ列9「補足・訂正メモ(人間)」へ。
              AI補完（モードB）がこの記入を最優先で商品説明に反映する。
@@ -476,6 +463,23 @@
           <div class="qreg-form-body">
             <textarea id="correction-note" rows="3" oninput="syncUi()"
               placeholder="傷・サイズ・正しい商品名などを自由に。後でAIが商品説明を作る時にこの内容を最優先で反映します"></textarea>
+          </div>
+        </details>
+        <details id="location-details" class="qreg-formrow">
+          <summary>
+            <span class="qreg-form-label">保管場所</span>
+            <b id="qreg-location-label">未選択</b>
+            <span class="qreg-chip-blue qreg-chip" id="qreg-location-src">既定</span>
+            <span class="qreg-chevron">▾</span>
+          </summary>
+          <div class="qreg-form-body">
+            <select id="location" onchange="onLocationChange()">
+              <option value="">選択してください</option>
+              <option value="店舗">店舗</option>
+              <option value="店舗2階">店舗2階（物置）</option>
+              <option value="ガレージ">ガレージ</option>
+              <option value="有楽町">有楽町</option>
+            </select>
           </div>
         </details>
       </div>
@@ -650,7 +654,17 @@
   //     （前の品の値が次の品に混入すると、静かに間違った値段が付く）。
   var PRICE_OPEN_KEY = 'quickreg_price_open';
   var lastPriceOpen = (function () { try { return localStorage.getItem(PRICE_OPEN_KEY) === '1'; } catch (e) { return false; } })();
-  var lastLocation = (function () { try { return localStorage.getItem(LAST_LOCATION_KEY) || ''; } catch (e) { return ''; } })();
+  // 🔴【2026-07-30 オーナー指示】保管場所の初期値は「店舗」。
+  //    「ほぼ保管場所は店舗しか使わないので初期『店舗』固定でいきましょう。
+  //      もし別の場所の場合は一度手動で変えて、前回状態を維持。」
+  //    実測でも保管場所は「店舗」175件の**1種類だけ**（2026-07-30・商品マスタ）。
+  //    それまでは初回だけ空で「保管場所を選んでください」で1回止まっていた。
+  //    前回値を覚える仕組みは元からあるので、**空のときの既定を足すだけ**でよい。
+  var DEFAULT_LOCATION = '店舗';
+  var lastLocation = (function () {
+    try { return localStorage.getItem(LAST_LOCATION_KEY) || DEFAULT_LOCATION; }
+    catch (e) { return DEFAULT_LOCATION; }
+  })();
 
   // ---- UI小物 ----
   function toast(msg, kind) {
@@ -726,6 +740,13 @@
   function syncLocationLabel() {
     var v = document.getElementById('location').value;
     document.getElementById('qreg-location-label').textContent = v || '未選択';
+    // 🔴 その値が「既定」なのか「前に自分で選んだ値」なのかを出し分ける。
+    //    一度も選んでいないのに「前回値」と出ると、選んだ覚えのない値を信用させてしまう。
+    var src = document.getElementById('qreg-location-src');
+    if (!src) return;
+    var saved = '';
+    try { saved = localStorage.getItem(LAST_LOCATION_KEY) || ''; } catch (e) { saved = ''; }
+    src.textContent = saved ? '前回値' : '既定';
   }
   window.onLocationChange = function () { syncLocationLabel(); }; // 前回値の保存は登録成功時のみ
   window.uiBack = function () {
