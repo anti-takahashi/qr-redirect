@@ -42,8 +42,8 @@
   🔴 このページが守る線
      ・表示にGoogleを一切使わない。読むのは同じフォルダの data.json だけ。
        写真だけは lh3.googleusercontent.com（CDN直・画像1枚）＝**出なくても値段は出る**。
-     ・**カゴはQRを読んだときだけ**（?t= で開いたときだけ）。一覧を作らない。
-       一点物なので、店外からカゴに入れられると「取り置けた」と受け取られ**二重売却**になる。
+     ・**候補はQRを読んだときだけ**（?t= で開いたときだけ）。一覧を作らない。
+       一点物なので、店外から候補に入れられると「取り置けた」と受け取られ**二重売却**になる。
      ・お気に入りは本人確認が要るのでGAS（会員カタログ）のまま。ここからはリンクするだけ。
      ・印刷済みQRの宛先URLは**GASのまま1文字も変えない**（不変条件4）。これは今も守っている。
        🔴 ただし**「置き換えではない」はもう成り立たない**（2026-07-29）。
@@ -151,12 +151,12 @@
     text-decoration: underline; cursor: pointer; font-size: 12px; }
   .ai-note { font-size: 10.5px; color: var(--sub); margin-top: 9px; line-height: 1.55; }
 
-  /* カゴ＝今この場の会計（端末内）／お気に入り＝また来たとき（公式LINE）。目的が違うので別枠
+  /* 候補＝今この場の会計（端末内）／お気に入り＝また来たとき（公式LINE）。目的が違うので別枠
      🔴【2026-07-30 デザイン案C】**押す場所は1つに絞る。**
         それまでは48pxの枠付きボタンが3つ縦に並び、どれも同じ重さだった
-        （カゴに入れる／お気に入り／カゴを見る）＝お客様がどれを押せばよいか分からない。
-        さらに「カゴに入れる」は**押す前が白・押した後が塗り**で、案内として逆向きだった。
-        主役＝カゴに入れる（塗り）。入れたあとは枠だけ＋✓（done の見た目）。
+        （候補に入れる／お気に入り／候補を見る）＝お客様がどれを押せばよいか分からない。
+        さらに「候補に入れる」は**押す前が白・押した後が塗り**で、案内として逆向きだった。
+        主役＝候補に入れる（塗り）。入れたあとは枠だけ＋✓（done の見た目）。
         お気に入りは枠を外して控えめに。ただし**タップ先は48px以上を維持**
         （CLAUDE.md「カタログとスマホ管理ページは必ずスマホで見やすく」）。 */
   .d-acts { display: flex; gap: 9px; margin-top: 14px; }
@@ -189,7 +189,7 @@
   .stale-note { max-width: 640px; margin: 10px auto 0; padding: 0 14px; font-size: 10.5px;
     color: var(--sub); line-height: 1.7; text-align: center; }
 
-  /* カゴ（localStorage・端末内・30日）。GAS版とは別ドメインなので中身は共有されない */
+  /* 候補（localStorage・端末内・30日）。GAS版とは別ドメインなので中身は共有されない */
   .cart-wrap { max-width: 640px; margin: 16px auto 0; padding: 0 12px; }
   .back-link { display: inline-flex; align-items: center; min-height: 48px; margin-bottom: 8px;
     font-size: 14px; color: var(--accent-dark); text-decoration: none; cursor: pointer; }
@@ -253,14 +253,14 @@
 
 <div id="view-cart" class="cart-wrap" style="display:none;">
   <a class="back-link" onclick="closeCart()">← 戻る</a>
-  <h2 class="cart-title">🧺 カゴ</h2>
+  <h2 class="cart-title">候補</h2>
   <div id="cart-total" class="cart-total" style="display:none;">
     <span class="cart-total-label"><span id="cart-total-count">0点</span>の合計</span>
     <span class="cart-total-sum" id="cart-total-sum">¥0</span>
   </div>
   <div id="cart-total-note" class="cart-total-note" style="display:none;"></div>
   <div class="keep-list-note" id="cart-note">
-    レジで「これ全部で」とお見せするためのカゴです。<strong>お取り置きではありません。</strong><br>
+    レジで「これ全部で」とお見せするための候補の一覧です。<strong>お取り置きではありません。</strong><br>
     この端末に一時保存されます（保存期間の目安は30日）。またのご来店用に残したい品は、
     商品ページの「☆ お気に入り（公式LINE）」へどうぞ。
   </div>
@@ -337,7 +337,7 @@
     return '';
   }
 
-  // ---- カゴ（localStorage・端末内） ---------------------------------------
+  // ---- 候補（localStorage・端末内） ---------------------------------------
   function loadCart() {
     try {
       var raw = localStorage.getItem(CART_KEY);
@@ -448,17 +448,17 @@
 
     var kept = isKept(token);
     var cartBtn = '<button type="button" class="cart-btn' + (kept ? ' on' : '') + '" id="cart-btn">' +
-      (kept ? '✓ カゴに入れた' : 'カゴに入れる') + '</button>';
+      (kept ? '✓ 候補に入れた' : '候補に入れる') + '</button>';
 
     var totals = cartTotals(loadCart());
     var cartOpen = totals.count > 0
-      ? '<button type="button" class="cart-open" id="cart-open">🧺 カゴ ' + totals.count + '点 ' +
+      ? '<button type="button" class="cart-open" id="cart-open">候補 ' + totals.count + '点 ' +
         yen(totals.sum) + ' を見る</button>'
       : '';
 
     // お気に入りは「誰の」を特定する必要がある＝公式LINEのログインが要るのでGAS側のまま。
     // ここからはリンクするだけ（開けない端末があることは承知のうえ。値段の表示はそれに依存しない）。
-    // 🔴【2026-07-30 案C】お気に入りは**枠を外して控えめに**（主役はカゴに入れる1つ）。
+    // 🔴【2026-07-30 案C】お気に入りは**枠を外して控えめに**（主役は候補に入れる1つ）。
     //    説明も2行→1行。長い注意書きを常時出しても読まれず、押す場所が増えて見えるだけ。
     var favHtml =
       '<p class="fav-why">お気に入りは<b>公式LINE</b>に残るので、端末が変わっても消えません。</p>' +
@@ -524,7 +524,7 @@
     $('cart-body').innerHTML = list.map(function (it) {
       // 🔴【2026-07-29】枠は56pxなのに、詳細画面で保存した =w1000（1000×1333px）が入っていた。
       //   通信はブラウザキャッシュに載るが、**1枚あたり5.1MBのビットマップを展開する**ので、
-      //   5点入ったカゴで25MB。レジ前で固まるのはこれ。
+      //   5点入った候補で25MB。レジ前で固まるのはこれ。
       //   既にlocalStorageへ保存済みの古いURLも**読むときに直す**（会員一覧と同じ手）。
       var thumbUrl = String(it.thumbnail || '').replace(/=w\d+$/, '=w296');
       var img = thumbUrl ? '<img src="' + escapeHtml(thumbUrl) + '" alt="" loading="lazy" decoding="async">' : '';
@@ -537,11 +537,11 @@
           '<p class="price">' + price + '</p>' +
         '</div>' +
         '<button type="button" class="keep-item-remove" data-token="' + escapeHtml(it.token) + '" ' +
-          'aria-label="カゴから外す" title="カゴから外す">✕</button>' +
+          'aria-label="候補から外す" title="候補から外す">✕</button>' +
         '</div>';
     }).join('') + (t.count === 0
-      ? '<div class="cart-empty"><span class="cart-empty-icon">🧺</span>カゴは空です。<br>' +
-        '気になる品のQRを読み込んで「カゴに入れる」を押すと、ここに並びます。</div>'
+      ? '<div class="cart-empty"><span class="cart-empty-icon">✓</span>候補はまだありません。<br>' +
+        '気になる品のQRを読み込んで「候補に入れる」を押すと、ここに並びます。</div>'
       : '');
 
     var btns = $('cart-body').querySelectorAll('.keep-item-remove');
