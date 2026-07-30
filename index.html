@@ -138,26 +138,44 @@
   /* 採寸＝置けるかを決める情報。おまけの中でもこれだけは大きく */
   .d-dim { font-size: 15px; color: var(--ink); font-weight: 600; margin: 0 0 3px; line-height: 1.5; }
   .d-meta { font-size: 11.5px; color: var(--sub); margin: 0 0 10px; line-height: 1.6; }
+  /* 🔴【2026-07-30 案C】種類は文章の中に埋めず、独立した印にする。
+     お客様は「これは何か」を一目で確かめたいだけで、読ませたいのは説明文の方。
+     色は付けない（商品が主役・画面は引く）。 */
+  .d-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+  .d-chip {
+    font-size: 11.5px; color: var(--sub); border: 1px solid var(--line);
+    border-radius: 20px; padding: 2px 11px; line-height: 1.7; background: #fff;
+  }
   .desc { font-size: 14px; line-height: 1.9; white-space: pre-wrap; color: var(--ink); }
   .desc-more { display:inline-block; margin-left:6px; color: var(--accent);
     text-decoration: underline; cursor: pointer; font-size: 12px; }
   .ai-note { font-size: 10.5px; color: var(--sub); margin-top: 9px; line-height: 1.55; }
 
-  /* カゴ＝今この場の会計（端末内）／お気に入り＝また来たとき（公式LINE）。目的が違うので別枠 */
+  /* カゴ＝今この場の会計（端末内）／お気に入り＝また来たとき（公式LINE）。目的が違うので別枠
+     🔴【2026-07-30 デザイン案C】**押す場所は1つに絞る。**
+        それまでは48pxの枠付きボタンが3つ縦に並び、どれも同じ重さだった
+        （カゴに入れる／お気に入り／カゴを見る）＝お客様がどれを押せばよいか分からない。
+        さらに「カゴに入れる」は**押す前が白・押した後が塗り**で、案内として逆向きだった。
+        主役＝カゴに入れる（塗り）。入れたあとは枠だけ＋✓（done の見た目）。
+        お気に入りは枠を外して控えめに。ただし**タップ先は48px以上を維持**
+        （CLAUDE.md「カタログとスマホ管理ページは必ずスマホで見やすく」）。 */
   .d-acts { display: flex; gap: 9px; margin-top: 14px; }
   .cart-btn {
-    flex: 1; min-height: 48px; border-radius: 22px; font-size: 14.5px; cursor: pointer;
-    font-family: inherit; display: grid; place-items: center; padding: 0 14px; background: #fff;
-    border: 1px solid var(--accent); color: var(--accent-dark);
+    flex: 1; min-height: 52px; border-radius: 26px; font-size: 15.5px; cursor: pointer;
+    font-family: inherit; display: grid; place-items: center; padding: 0 14px;
+    background: var(--accent); border: 1px solid var(--accent); color: #fff; font-weight: 600;
   }
-  .cart-btn.on { background: var(--accent); color: #fff; }
+  .cart-btn.on {
+    background: #fff; color: var(--accent-dark); font-weight: 400;
+  }
   .cart-btn[disabled] { opacity: .45; cursor: not-allowed; }
   .fav-btn {
-    display: grid; place-items: center; width: 100%; margin-top: 9px; min-height: 48px;
-    border-radius: 22px; border: 1px solid var(--line); color: var(--sub);
-    background: #fff; font-size: 13px; text-decoration: none;
+    display: grid; place-items: center; width: 100%; margin-top: 4px; min-height: 48px;
+    border: 0; color: var(--sub); background: transparent;
+    font-size: 13px; text-decoration: none;
   }
-  .fav-why { font-size: 11px; color: var(--sub); line-height: 1.65; margin: 7px 0 0; }
+  .fav-btn:active { color: var(--accent-dark); }
+  .fav-why { font-size: 11.5px; color: var(--sub); line-height: 1.7; margin: 18px 0 2px; text-align: center; }
   .fav-link { color: var(--accent); }
   .cart-why { font-size: 11px; color: var(--sub); line-height: 1.65; margin: 8px 0 0; }
   .cart-open {
@@ -213,7 +231,7 @@
   .lightbox.open { display: flex; }
   .lightbox img { max-width: 96vw; max-height: 80vh; object-fit: contain; border-radius: 6px; }
   .lightbox-btn { position: absolute; top: 10px; right: 14px; background: rgba(255,255,255,.16);
-    color: #fff; border: none; border-radius: 22px; min-height: 44px; padding: 0 18px;
+    color: #fff; border: none; border-radius: 22px; min-height: 48px; padding: 0 18px;
     font-size: 16px; font-family: inherit; cursor: pointer; }
 
   .policy-footer { max-width: 640px; margin: 8px auto 0; padding: 0 16px; text-align: center; }
@@ -440,11 +458,12 @@
 
     // お気に入りは「誰の」を特定する必要がある＝公式LINEのログインが要るのでGAS側のまま。
     // ここからはリンクするだけ（開けない端末があることは承知のうえ。値段の表示はそれに依存しない）。
+    // 🔴【2026-07-30 案C】お気に入りは**枠を外して控えめに**（主役はカゴに入れる1つ）。
+    //    説明も2行→1行。長い注意書きを常時出しても読まれず、押す場所が増えて見えるだけ。
     var favHtml =
+      '<p class="fav-why">お気に入りは<b>公式LINE</b>に残るので、端末が変わっても消えません。</p>' +
       '<a class="fav-btn" href="' + escapeHtml(gasUrl('view=members')) + '" target="_blank" rel="noopener">' +
-      '☆ お気に入り（公式LINEの会員カタログ）</a>' +
-      '<p class="fav-why">お気に入りは<b>公式LINEのアカウントに残ります</b>ので、端末やブラウザが変わっても消えません。' +
-      '（この画面ではなく、公式LINEの会員カタログでご利用いただけます）</p>';
+      '☆ お気に入り（公式LINEの会員カタログ）</a>';
 
     box.innerHTML =
       '<div class="detail-panel">' +
@@ -457,7 +476,9 @@
         '</div>' +
         '<hr class="d-sep">' +
         (item.dimensions ? '<p class="d-dim">' + escapeHtml(item.dimensions) + '</p>' : '') +
-        (item.category ? '<p class="d-meta">' + escapeHtml(item.category) + '</p>' : '') +
+        // 種類は文章行ではなく印にする（案C）。空なら何も出さない＝「その他」だけの行を作らない
+        (item.category ? '<div class="d-chips"><span class="d-chip">' +
+          escapeHtml(item.category) + '</span></div>' : '') +
         descHtml(item) +
         ((item.description || item.catalogDescription)
           ? '<p class="ai-note">※この商品説明はAIが写真をもとに作成しています。' +
