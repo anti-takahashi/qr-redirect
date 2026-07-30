@@ -610,6 +610,21 @@
   var entryOpen = false;       // 入力シート表示中
   var uploading = false;       // 写真の前処理（リサイズ）＋アップロード中。前処理も含めるのが要点（下記 entryGen 参照）
   var submitting = false;
+
+  // 🔴【2026-07-30 オーナー指示】登録は**キュー**にする。
+  //    「QR撮影→照合(キャッシュで早く)→商品撮影(アップは裏で)→値付け等→
+  //      登録ボタン(アップ中でも登録ボタンを押せる)」
+  //    それまでは写真の送信が終わるまで登録ボタンが押せず、棚の前で待たされていた。
+  //
+  //    やり方: 押した時点で入力内容を**その場で確保**し、待受へ戻して次のQRへ進める。
+  //           写真の送信が終わったら、確保した内容で registerProduct を送る。
+  //
+  //    🔴 失敗を黙って消さないこと（ここが一番危ない）。
+  //       過去にT-00164で「写真だけDriveに残り、現物が在庫に1点も載らない」事故が起きている。
+  //       送信待ちが残っている間はタブを閉じるときに警告し、失敗は**消えない赤い帯**で出す。
+  var pendingUpload = null;    // {gen, promise} 進行中の写真アップロード（登録側が待ち合わせる）
+  var queued = 0;              // 送信待ちの登録件数（0になるまでタブを閉じさせない）
+  var failedJobs = [];         // {masterId, message} 失敗した登録（人が拾うまで消さない）
   // 🔴【2026-07-26追加・Codex指摘】入力シートの「世代」。openEntry / resetToStandby のたびに増える。
   //   遅れて返ったRPC応答が、既に別の品へ移った画面を触ってしまう事故を塞ぐための番号。
   //   実際に起きうる壊れ方（エラーが1つも出ない）:
@@ -668,9 +683,11 @@
     el.appendChild(div);
   }
   window.syncUi = function () {
-    var ready = photoCount > 0;
+    // 🔴【2026-07-30 オーナー指示】「アップ中orアップ済みなら登録できる形」。
+    //    送信の終わりを待たせない。**まだ1枚も撮っていないときだけ**止める。
+    var ready = photoCount > 0 || uploading;
     var badge = document.getElementById('state-badge');
-    badge.textContent = ready ? '✓ 準備完了' : '！写真待ち';
+    badge.textContent = photoCount > 0 ? '✓ 準備完了' : (uploading ? '⤴ 写真を送信中（登録できます）' : '！写真待ち');
     badge.className = 'qreg-badge ' + (ready ? 'qreg-badge-ready' : 'qreg-badge-wait');
     var photoBtn = document.getElementById('photo-btn');
     photoBtn.classList.toggle('qreg-photo-again', ready);
@@ -687,8 +704,12 @@
       priceDisp.classList.remove('qreg-price-set');
     }
     var btn = document.getElementById('register-btn');
-    btn.disabled = !(currentMasterId && ready && !uploading && !submitting);
-    btn.textContent = ready ? '登録して次へ →' : '写真を撮ると登録できます';
+    // 🔴【2026-07-30】`!uploading` を外した。ここが「アップ待ちで棚の前に立たされる」原因だった。
+    //    写真が1枚でもあるか送信中なら押せる＝押した時点で送信待ちへ積み、次のQRへ進める。
+    btn.disabled = !(currentMasterId && ready && !submitting);
+    btn.textContent = ready
+      ? (uploading ? '登録して次へ →（写真は送信中）' : '登録して次へ →')
+      : '写真を撮ると登録できます';
     var corr = document.getElementById('correction-note').value.trim();
     var corrDisp = document.getElementById('correction-display');
     if (corr) {
@@ -1280,7 +1301,20 @@
   // OS標準カメラ（ファイル撮影・capture）から取得。
   // 【2026-07-23】drawToJpeg は撤去。原寸を new Image() で展開してから縮小する作りで、
   // 大きな写真の端末でメモリ不足を起こしていた。縮小しながらデコードする makeDecodeCanvas_ に一本化。
-  var UPLOAD_MAX_PX = 2000, UPLOAD_JPEG_Q = 0.82;
+  // 🔴【2026-07-30 実測】2000pxは**表示の2倍**で、待ち時間の主因だった。
+  //    オーナー報告「写真のアップロード待ち時間があり登録ボタンを押す前で待つ状態」。
+  //
+  //    測ったこと:
+  //      ・Drive上の実物（*_live_*.jpg）… **650〜780KB**。base64にすると +33% ＝ 約1MB を毎回送っている
+  //      ・表示側が要求する最大 … カタログの**拡大表示で `=w1000`**。一覧は `=w296`、
+  //        管理側のサムネは `=w200`（コード.gs buildThumbnailUrl_ / 8540行）
+  //      ＝ **1000pxより大きい絵を使う場所が1つも無い。**
+  //
+  //    1280px にすると画素数は (1280/2000)^2 = 41%。実物なら 270〜320KB 見当＝**転送量は約1/2.4**。
+  //    拡大表示の1000pxより上なので、見え方は変わらない。
+  //    ⚠️ ネット出品用の写真はここではなく `{masterId}/net/`（ターンテーブル別撮り）なので、
+  //       この値を下げても出品用の画質には影響しない（docs/registration-and-listing-flows.md）。
+  var UPLOAD_MAX_PX = 1280, UPLOAD_JPEG_Q = 0.82;
   window.takePhoto = function () {
     if (!currentMasterId || uploading) return;
     // 期限ぎわは撮らせない（撮ると写真だけ残って登録できない＝現物が在庫から消える）
@@ -1336,9 +1370,13 @@
     imgTag.src = dataUrl;
     document.getElementById('photo-area').appendChild(imgTag);
     var filename = currentMasterId + '_live_' + Date.now() + '.jpg';
-    rpc('uploadProductImage', {
+    var upP = rpc('uploadProductImage', {
       masterId: currentMasterId, filename: filename, base64Data: dataUrl, mimeType: 'image/jpeg'
-    }).then(function (res) {
+    });
+    // 🔴 登録側が待ち合わせるための控え。**gen付きで持つ**＝別の品の登録が
+    //    この写真を待ってしまう事故を防ぐ（entryGen の考え方と同じ）。
+    pendingUpload = { gen: gen, promise: upP };
+    upP.then(function (res) {
       // 🔴 別の品へ移った後に届いた応答で、currentFolderUrl と photoCount を触らない。
       //    ここを触ると「今の品」が他人のフォルダURLと偽の枚数を持ったまま登録されてしまう。
       if (gen !== entryGen) return;
@@ -1363,8 +1401,9 @@
   window.submitRegister = function () {
     if (submitting) return;
     if (!currentMasterId) { toast('先にQRを読み取ってください', 'err'); return; }
-    if (uploading) { entryStatus('写真をアップロード中です。完了までお待ちください…', 'info'); return; }
-    if (photoCount < 1) { entryStatus('写真を1枚撮ってください（写真は必須です）', 'err'); return; }
+    // 🔴【2026-07-30】アップロード中でも押せる（オーナー指示）。待たせない。
+    //    ただし「写真が1枚も無い」ものは通さない＝送信中(uploading)なら1枚あるとみなす。
+    if (photoCount < 1 && !uploading) { entryStatus('写真を1枚撮ってください（写真は必須です）', 'err'); return; }
     var location = document.getElementById('location').value;
     if (!location) {
       document.getElementById('location-details').setAttribute('open', '');
@@ -1411,40 +1450,93 @@
       oldIdYahoo: '',
       oldIdMercari: ''
     };
-    submitting = true;
-    syncUi();
-    entryStatus('登録中…', 'info');
+    // ================= ここから「送信待ちへ積む」＝人は待たない =================
+    // 🔴【2026-07-30 オーナー指示】
+    //    「キューとして進めるような形ですね。写真登録待ちを」
+    //    「照合待ちとアップ待ちがQR登録のシステム的なロスタイムでした」
+    //    押した時点で入力内容を確保し、**すぐ待受へ戻して次のQRへ進める**。
+    //    写真の送信が終わってから registerProduct を送る（folderUrl が要るため順序は変えられない）。
     var doneId = currentMasterId;
     var gen = entryGen;
-    // 登録が成功したときの共通処理。世代がずれていたら画面には触らず、登録できた事実だけ知らせる。
-    function onRegistered_(shownId, okText) {
+    var capturedFolderUrl = currentFolderUrl;
+    // この品の写真アップロード（進行中なら待ち合わせる）。**gen で本人確認**してから使う。
+    var waitUpload = (pendingUpload && pendingUpload.gen === gen) ? pendingUpload.promise : null;
+
+    queued++;
+    lastLocation = location;
+    try { localStorage.setItem(LAST_LOCATION_KEY, location); } catch (e) {}
+    renderQueue();
+    toast(doneId + (waitUpload ? ' 送信待ちに入れました' : ' 登録中'), 'ok');
+    resetToStandby(true);
+    autoNextScan();   // 次のQR撮影カメラを即起動（タップ0）
+
+    function finish_(shownId, okText) {
+      queued = Math.max(0, queued - 1);
       sessionCount++;
-      lastLocation = location;
-      try { localStorage.setItem(LAST_LOCATION_KEY, location); } catch (e) {}
-      if (gen !== entryGen) { toast(shownId + ' ' + okText, 'ok'); syncUi(); return; }
-      resetToStandby(true);
+      renderQueue();
       toast(shownId + ' ' + okText, 'ok');
-      autoNextScan(); // 操作文脈が残っていれば次のQR撮影カメラを即起動（タップ0）
+      syncUi();
     }
-    rpc('registerProduct', data).then(function (res) {
-      submitting = false;
-      onRegistered_((res && res.masterId ? res.masterId : doneId), '登録✓ 次のQRをどうぞ');
+    // 🔴 失敗を黙って消さない。人が別の品へ移った後に落ちても、**消えない帯**で残す。
+    //    過去にT-00164で「写真だけDriveに残り、現物が在庫に載らない」事故が起きている。
+    function fail_(msg) {
+      queued = Math.max(0, queued - 1);
+      failedJobs.push({ masterId: doneId, message: String(msg || '') });
+      renderQueue();
+      syncUi();
+    }
+
+    (waitUpload || Promise.resolve(null)).then(function (res) {
+      // 写真の送信結果から folderUrl を取る（共有変数は既に次の品のものに変わっている）
+      data.folderUrl = (res && res.folderUrl) ? res.folderUrl : capturedFolderUrl;
+      return rpc('registerProduct', data);
+    }).then(function (res) {
+      finish_((res && res.masterId ? res.masterId : doneId), '登録✓');
     }).catch(function (err) {
       var msg = err.message || '';
-      // 通信断→再送で「既に登録済み」＝初回の登録は成功している（サーバの二重登録ガード）。成功扱いで次へ。
-      if (msg.indexOf('既に登録済み') !== -1) {
-        submitting = false;
-        onRegistered_(doneId, '登録済みを確認✓ 次のQRをどうぞ');
+      // 通信断→再送で「既に登録済み」＝初回の登録は成功している（サーバの二重登録ガード）。成功扱い。
+      if (msg.indexOf('既に登録済み') !== -1) { finish_(doneId, '登録済みを確認✓'); return; }
+      // トークン自体が死んだらページ全体の問題（送信待ちの他の品も通らない）
+      if (isTokenDeadError(msg)) {
+        queued = Math.max(0, queued - 1);
+        renderQueue();
+        showFatal('続行できません', tokenDeadHint_(msg), false);
         return;
       }
-      // トークン自体が死んだ場合だけは、古い世代から届いてもページ全体の問題なので通す
-      if (isTokenDeadError(msg)) { submitting = false; showFatal('続行できません', tokenDeadHint_(msg), false); return; }
-      if (gen !== entryGen) return;   // 古い品の失敗応答で、今の品の submitting を戻さない
-      submitting = false;
-      entryStatus('登録エラー: ' + msg + '　内容を確認してもう一度「登録して次へ」を押してください。', 'err');
-      syncUi();
+      fail_(msg);
     });
   };
+
+  // ---- 送信待ち／失敗の帯（画面上部に固定。0件なら出さない） ----
+  function renderQueue() {
+    var el = document.getElementById('qreg-queue');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'qreg-queue';
+      el.style.cssText = 'position:fixed; left:0; right:0; top:0; z-index:60; font-size:13px;'
+        + 'line-height:1.6; padding:9px 12px; text-align:center; font-weight:600;';
+      document.body.appendChild(el);
+    }
+    if (failedJobs.length) {
+      // 🔴 失敗が1件でもあれば、そちらを優先して**赤で出し続ける**（自動で消さない）
+      el.style.display = '';
+      el.style.background = '#b53c32';
+      el.style.color = '#fff';
+      el.innerHTML = '登録できなかった品が' + failedJobs.length + '件あります：'
+        + failedJobs.map(function (j) { return j.masterId; }).join('・')
+        + '<br><span style="font-weight:400; font-size:11.5px;">'
+        + '同じラベルをもう一度読み取って登録し直してください（写真は撮り直しになります）</span>';
+      return;
+    }
+    if (queued > 0) {
+      el.style.display = '';
+      el.style.background = '#2f5d4a';
+      el.style.color = '#fff';
+      el.textContent = '送信待ち ' + queued + '件（そのまま次の品へ進んで大丈夫です）';
+      return;
+    }
+    el.style.display = 'none';
+  }
 
   // ---- ソフトキーボード対策（iOS: キーボードでlayout viewportは縮まずfixed下部が隠れる） ----
   // visualViewportの実高に#appを合わせ、下部固定の「登録して次へ」がキーボードの上に出続けるようにする。
@@ -1467,9 +1559,13 @@
     })();
   }
 
-  // ---- 離脱ガード（アップロード・登録送信中のみ。iOS Safariでは効かない場合があるが最終防波堤として） ----
+  // ---- 離脱ガード（iOS Safariでは効かない場合があるが最終防波堤として） ----
+  // 🔴【2026-07-30】**送信待ち(queued)と失敗(failedJobs)も見る**。
+  //    登録をキューにしたので、待受へ戻ると uploading/submitting は false に落ちる。
+  //    そのままだと「送信待ちが残っているのに、閉じても何も言われない」になる
+  //    ＝現物が在庫に載らないまま消える（T-00164と同じ壊れ方）。
   window.addEventListener('beforeunload', function (e) {
-    if (uploading || submitting) {
+    if (uploading || submitting || queued > 0 || failedJobs.length) {
       var msg = '送信が完了していません。閉じると登録されない場合があります。';
       e.preventDefault();
       e.returnValue = msg;
