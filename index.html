@@ -57,6 +57,16 @@
   ===========================================================================
 -->
 <style>
+  /* ===========================================================================
+     色と書体の土台（2026-07-30 オーナー決定「案C＝面ごとに変える」）
+     詳細と正本は docs/design-system.md
+
+     🔴 決めごとは2つだけ:
+       ① **ブランドの色は面ごと**（カタログ＝茶 #7c6a4f。店の顔なので変えない）
+       ② **意味の色は3面で固定**（カタログ／スマホ管理／PC版で同じ）
+            緑 = 安全・戻せる ／ 朱 = 取り返しがつかない ／ 芥子 = 注意
+          同じ色が面によって別の意味を持つと、覚え直しが起きる。
+     =========================================================================== */
   :root {
     --bg: #faf7f2;
     --panel: #ffffff;
@@ -66,12 +76,24 @@
     --accent-dark: #5b4c37;
     --line: #e3ddd0;
     --sold: #a5453a;
+
+    /* 意味の色（3面共通・PC版 theme.css の --state-* と同じ値） */
+    --sig-safe: #2f7d55;
+    --sig-danger: #b53c32;
+    --sig-warn: #a9791a;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html { -webkit-text-size-adjust: 100%; }
   body {
     margin: 0;
-    font-family: "Hiragino Mincho ProN", "Hiragino Sans", "Yu Gothic", "Noto Sans JP", serif;
+    /* 🔴【2026-07-30 オーナー決定】本文は**ゴシック**。「読みやすさ重視」。
+       それまでは "Hiragino Mincho ProN" が先頭だったため、
+       **iPhoneだけ明朝・Androidはゴシック**という不揃いな状態だった
+       （Windows/AndroidにHiragino Minchoが無く、Yu Gothicへ落ちていた）。
+       店内でお客様が読む画面なので、端末によって印象が変わるのは避ける。
+       明朝は店名（h1）だけに残す＝骨董らしさは見出し1行で足りる。 */
+    font-family: "Hiragino Sans", "Yu Gothic Medium", "Yu Gothic", "Noto Sans JP",
+                 "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
     background: var(--bg);
     color: var(--ink);
     font-size: 16px;
@@ -84,7 +106,11 @@
     border-bottom: 1px solid var(--line);
     background: var(--panel);
   }
-  header.shop-header h1 { font-size: 20px; letter-spacing: 0.12em; margin: 0 0 6px; font-weight: 600; }
+  /* 店名だけ明朝を残す（骨董らしさはここ1行で足りる。本文はゴシック＝上記） */
+  header.shop-header h1 {
+    font-size: 20px; letter-spacing: 0.12em; margin: 0 0 6px; font-weight: 600;
+    font-family: "Hiragino Mincho ProN", "Yu Mincho", YuMincho, "Shippori Mincho", serif;
+  }
   header.shop-header p { font-size: 12px; color: var(--sub); margin: 0; letter-spacing: 0.05em; }
 
   .detail-wrap { max-width: 640px; margin: 16px auto 0; padding: 0 12px; }
