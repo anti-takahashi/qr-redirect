@@ -173,7 +173,43 @@
       </button>
     </div>
   </section>
-  <section class="view" id="v-sale"><div class="card"><h2>売上を入れる</h2><p class="sub">準備中</p></div></section>
+  <!-- 売上を入れる: QRを続けて読んで「かご」に貯め、まとめて会計する -->
+  <section class="view" id="v-sale">
+    <div class="card">
+      <label class="f">
+        <span>QRを読むか、商品ID（T-00123）を入れる</span>
+        <input type="text" id="sale-input" inputmode="text" autocomplete="off"
+               autocapitalize="off" spellcheck="false" placeholder="T-00123">
+      </label>
+      <button class="btn primary" id="sale-add" type="button"><span class="t">かごに入れる</span></button>
+      <div class="msg" id="sale-msg"></div>
+    </div>
+
+    <div class="card" id="sale-cart-card" style="display:none;">
+      <h2>かご <span id="sale-count" class="sub"></span></h2>
+      <div id="sale-cart"></div>
+      <div style="border-top:1px solid var(--line); margin-top:10px; padding-top:10px;">
+        <label class="f">
+          <span>値引き（要らなければ空のまま）</span>
+          <div style="display:flex; gap:8px;">
+            <input type="number" id="sale-disc" inputmode="numeric" min="0" placeholder="0" style="flex:1;">
+            <select id="sale-disc-type" class="input" style="width:38%; min-height:52px;">
+              <option value="yen">円びき</option>
+              <option value="pct">％びき</option>
+            </select>
+          </div>
+        </label>
+        <div id="sale-total" style="font-size:19px; font-weight:700; margin:6px 0 12px;"></div>
+        <button class="btn primary" id="sale-go" type="button"><span class="t">この内容で会計する</span></button>
+        <div class="msg" id="sale-result"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>今日売れたもの</h2>
+      <div id="sale-today" class="sub">読み込んでいます…</div>
+    </div>
+  </section>
   <section class="view" id="v-search"><div class="card"><h2>QRで探す・直す</h2><p class="sub">準備中</p></div></section>
   <section class="view" id="v-pricing"><div class="card"><h2>未値付けに値段をつける</h2><p class="sub">準備中</p></div></section>
 </main>
@@ -258,6 +294,13 @@
   });
 
   function go(name) { show(name); pushHistory(); }
+
+  // 画面を開いたときに読むもの。**ここ1か所に集める**。
+  // 🔴 PC版で「画面ごとに読み込みを書いていたら、5画面ぶん無言で切れていた」という
+  //    実害が2026-07-31にあった（左メニューを束ねたとき配線が消えたのに誰も鳴らなかった）。
+  //    出す場所と読む場所を1か所で対にしておけば、足し忘れが見つけやすい。
+  var ONSHOW = {};
+
   var btns = document.querySelectorAll("[data-go]");
   for (var i = 0; i < btns.length; i++) {
     (function (b) {
@@ -267,6 +310,10 @@
         //    間に合っていないときだけ画面を出して、何が起きているかを見せる。
         if (name === "quickreg") { openQuickReg(); return; }
         go(name);
+        // 開いたときに読む処理（画面ごと）。
+        // 🔴 ここを**画面を出す1か所**にまとめる。あちこちで読むと、
+        //    「開いたのに読み込みが走らない」画面が黙って増える（PC版で実際に起きた）。
+        if (ONSHOW[name]) { try { ONSHOW[name](); } catch (e) { /* 表示は既に出ている */ } }
       });
     })(btns[i]);
   }
@@ -397,6 +444,226 @@
     QR_PRE.url = "";           // 覚えている古いURLを捨ててから取り直す
     openQuickReg();
   });
+
+  // ==========================================================================
+  // 売上を入れる
+  //
+  // 流れ: QRを続けて読む → かごに貯まる → 値引き（任意）→ 会計
+  //
+  // 🔴 金額はサーバが決める。画面の数字は**確かめ算**として送るだけ。
+  //    createSale は商品マスタの店頭価格から小計・値引き・受領額を自分で計算し、
+  //    こちらが送った expectedTotal と食い違えば**登録を拒否する**
+  //    （かごに入れた後で誰かが値段を直した、を検知するため）。
+  //
+  // 🔴 operationId は必須。二重会計を止める鍵なので、
+  //    **会計1回につき1つ**作り、成功するまで同じものを使い回す
+  //    （押し直しても2件にならない）。
+  // ==========================================================================
+  var cart = [];              // [{masterId, name, listPrice, image}]
+  var saleOpId = "";          // いまの会計の識別子（成功したら捨てる）
+
+  function yen(n) { return "¥" + Number(n || 0).toLocaleString("ja-JP"); }
+  function newOpId() {
+    return "kanri-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+  }
+
+  function saleSubtotal() {
+    var s = 0;
+    for (var i = 0; i < cart.length; i++) s += Number(cart[i].listPrice || 0);
+    return s;
+  }
+  function saleDiscountYen() {
+    var v = Number($("sale-disc").value || 0);
+    if (!v || v < 0) return 0;
+    if ($("sale-disc-type").value === "pct") {
+      // ％は小計に掛ける。端数は切り捨て（サーバも同じ規則で計算し直す）
+      return Math.floor(saleSubtotal() * Math.min(v, 100) / 100);
+    }
+    return Math.min(v, saleSubtotal());
+  }
+
+  function renderCart() {
+    var box = $("sale-cart");
+    $("sale-cart-card").style.display = cart.length ? "" : "none";
+    $("sale-count").textContent = cart.length ? "（" + cart.length + "点）" : "";
+    if (!cart.length) { box.innerHTML = ""; return; }
+    var h = "";
+    for (var i = 0; i < cart.length; i++) {
+      var it = cart[i];
+      h += '<div style="display:flex; align-items:center; gap:10px; padding:8px 0;' +
+           ' border-bottom:1px solid var(--line);">' +
+           (it.image ? '<img src="' + esc(it.image) + '" alt="" style="width:44px;height:44px;' +
+                       'object-fit:cover;border-radius:8px;">' : '') +
+           '<div style="flex:1; min-width:0;">' +
+           '<div style="font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' +
+           esc(it.name || it.masterId) + "</div>" +
+           '<div class="sub" style="font-size:12px;">' + esc(it.masterId) + "　" + yen(it.listPrice) + "</div>" +
+           "</div>" +
+           '<button type="button" class="sale-del" data-i="' + i + '" ' +
+           'style="min-width:44px;min-height:44px;border:0;background:transparent;' +
+           'color:var(--danger);font-size:20px;cursor:pointer;" aria-label="かごから外す">×</button>' +
+           "</div>";
+    }
+    box.innerHTML = h;
+    var dels = box.querySelectorAll(".sale-del");
+    for (var j = 0; j < dels.length; j++) {
+      (function (b) {
+        b.addEventListener("click", function () {
+          cart.splice(Number(b.getAttribute("data-i")), 1);
+          renderCart();
+        });
+      })(dels[j]);
+    }
+    renderTotal();
+  }
+
+  function renderTotal() {
+    var sub = saleSubtotal();
+    var d = saleDiscountYen();
+    var t = $("sale-total");
+    t.innerHTML = d
+      ? '<span class="sub" style="font-weight:400;">小計 ' + yen(sub) +
+        "　値引き −" + yen(d) + "</span><br>お会計 " + yen(sub - d)
+      : "お会計 " + yen(sub);
+  }
+  $("sale-disc").addEventListener("input", renderTotal);
+  $("sale-disc-type").addEventListener("change", renderTotal);
+
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function addToCart() {
+    var raw = String($("sale-input").value || "").trim();
+    var msg = $("sale-msg");
+    if (!raw) { msg.className = "msg err"; msg.textContent = "QRを読むか、商品IDを入れてください。"; return; }
+    msg.className = "msg"; msg.textContent = "調べています…";
+    call("resolveCartItem", { rawText: raw }).then(function (it) {
+      if (!it) {
+        msg.className = "msg err";
+        msg.textContent = "この商品が見つかりません。IDを確かめてください。";
+        return;
+      }
+      // 🔴 同じ品を2回入れない（一点物なので、2回読んだのは読み間違い）
+      for (var i = 0; i < cart.length; i++) {
+        if (cart[i].masterId === it.masterId) {
+          msg.className = "msg err";
+          msg.textContent = "この品はもうかごに入っています（" + it.masterId + "）。";
+          $("sale-input").value = "";
+          return;
+        }
+      }
+      // 🔴 売れている品を黙って入れない
+      if (it.stockStatus && it.stockStatus !== "在庫あり") {
+        msg.className = "msg err";
+        msg.textContent = "この品は「" + it.stockStatus + "」です。かごに入れませんでした。";
+        $("sale-input").value = "";
+        return;
+      }
+      cart.push(it);
+      $("sale-input").value = "";
+      msg.className = "msg ok";
+      msg.textContent = "入れました: " + (it.name || it.masterId);
+      renderCart();
+      $("sale-input").focus();
+    }).catch(function (e) {
+      msg.className = "msg err";
+      msg.textContent = e.message;
+    });
+  }
+  $("sale-add").addEventListener("click", addToCart);
+  $("sale-input").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); addToCart(); }
+  });
+
+  $("sale-go").addEventListener("click", function () {
+    if (!cart.length) return;
+    var res = $("sale-result");
+    var sub = saleSubtotal();
+    var d = saleDiscountYen();
+    var dv = Number($("sale-disc").value || 0);
+    if (!window.confirm(
+      cart.length + "点　" + yen(sub - d) + " で会計します。よろしいですか？\n\n" +
+      cart.map(function (x) { return "・" + (x.name || x.masterId) + "　" + yen(x.listPrice); }).join("\n")
+    )) return;
+
+    // 🔴 成功するまで同じ operationId を使う＝押し直しても2件にならない
+    if (!saleOpId) saleOpId = newOpId();
+    $("sale-go").disabled = true;
+    res.className = "msg"; res.textContent = "登録しています…";
+    call("createSale", {
+      cart: cart.map(function (x) { return x.masterId; }),
+      name: "", date: "",
+      operationId: saleOpId,
+      // 値引きはサーバが計算し直す。こちらは「何を指定したか」を渡すだけ。
+      discountSpec: dv > 0 ? { type: $("sale-disc-type").value, value: dv } : null,
+      // 🔴 画面に出していた合計。サーバの計算と違えば拒否される（値段が動いた検知）
+      expectedTotal: sub - d
+    }).then(function () {
+      res.className = "msg ok";
+      res.textContent = "会計しました。";
+      cart = [];
+      saleOpId = "";
+      $("sale-disc").value = "";
+      renderCart();
+      loadToday();
+    }).catch(function (e) {
+      res.className = "msg err";
+      res.textContent = e.message;
+      // 🔴 opId は捨てない。同じ会計をもう一度押したときに二重登録しないため。
+    }).finally(function () {
+      $("sale-go").disabled = false;
+    });
+  });
+
+  function loadToday() {
+    var box = $("sale-today");
+    call("listTodaySoldProducts", {}).then(function (rows) {
+      rows = rows || [];
+      if (!rows.length) { box.textContent = "まだありません。"; return; }
+      var h = "";
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
+        h += '<div style="display:flex; align-items:center; gap:8px; padding:7px 0;' +
+             ' border-bottom:1px solid var(--line);">' +
+             '<div style="flex:1; min-width:0; font-size:14px; overflow:hidden;' +
+             ' text-overflow:ellipsis; white-space:nowrap;">' +
+             esc(r.name || r.masterId) + "</div>" +
+             '<div class="sub" style="font-size:12px; white-space:nowrap;">' + yen(r.saleValue) + "</div>" +
+             '<button type="button" class="sale-undo" data-id="' + esc(r.masterId) + '" ' +
+             'style="min-height:44px;padding:0 10px;border:1px solid var(--line);' +
+             'border-radius:10px;background:#fff;font:inherit;font-size:13px;cursor:pointer;">戻す</button>' +
+             "</div>";
+      }
+      box.innerHTML = h;
+      var us = box.querySelectorAll(".sale-undo");
+      for (var j = 0; j < us.length; j++) {
+        (function (b) {
+          b.addEventListener("click", function () {
+            var id = b.getAttribute("data-id");
+            if (!window.confirm(id + " の売上を取り消します。よろしいですか？")) return;
+            b.disabled = true;
+            call("undoTodaySale", { masterId: id }).then(function () {
+              loadToday();
+            }).catch(function (e) {
+              b.disabled = false;
+              window.alert(e.message);
+            });
+          });
+        })(us[j]);
+      }
+    }).catch(function (e) {
+      // 🔴 読めなかったことを「まだありません」と混ぜない
+      box.innerHTML = '<span style="color:var(--danger);">今日の売上が<b>読めていません</b>' +
+                      '（0件ではありません）。<br>' + esc(e.message) + "</span>";
+    });
+  }
+  ONSHOW["sale"] = function () {
+    loadToday();
+    setTimeout(function () { $("sale-input").focus(); }, 60);
+  };
 
   function start() {
     if (!KEY || !API) { show("nokey"); return; }
