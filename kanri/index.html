@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>商品管理｜アンティーク家具たかはし</title>
+
+<!-- 🔴【2026-08-01】ここは**自社ドメイン**なので、外側の <head> が自分のものになる。
+     GASのWebアプリだと外側はGoogleのもので、
+       ・ホーム画面のアイコンと名前が届かない（「ア」になる）
+       ・Googleの注意表示が出る
+       ・複数アカウントで /macros/u/1/s/… へ書き換わって404
+     が全部起きていた。ここへ移すとその一群が構造ごと消える。 -->
+<link rel="apple-touch-icon" href="../icon-admin-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="../icon-admin-192.png">
+<meta name="apple-mobile-web-app-title" content="商品管理">
+<meta name="application-name" content="商品管理">
+<meta name="theme-color" content="#faf7f2">
+<meta name="robots" content="noindex, nofollow">
+<!-- 🔴 manifest は付けない。付けるとiOSが**web appとして起動**し、
+     ①開くURLが start_url に置き換わる ②localStorage が Safari と別領域になる。
+     2026-07-31に実機で踏んだ（ホーム画面から開くと鍵が見えない）。
+     アイコンと名前は上の apple-touch-icon / apple-mobile-web-app-title で足りる。 -->
+
+<style>
+  :root {
+    --bg: #faf7f2; --fg: #2f2b26; --accent: #7c6a4f;
+    --muted: #6b6255; --line: #e3dcd0; --card: #fff;
+    --ok: #2f7a4d; --danger: #c0392b;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
+  body {
+    font: 15px/1.75 "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* 上の帯: いつでも「いまどこか」と「戻る」が見える */
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--bg); border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-top)) 14px;
+    padding-top: calc(10px + env(safe-area-inset-top));
+  }
+  #back {
+    display: none; align-items: center; justify-content: center;
+    min-width: 44px; min-height: 44px; margin-left: -8px;
+    border: 0; background: transparent; color: var(--fg);
+    font-size: 22px; cursor: pointer;
+  }
+  #here { font-size: 17px; font-weight: 700; flex: 1; }
+  #who { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+  main { padding: 14px; max-width: 720px; margin: 0 auto; }
+
+  /* 🔴 画面は「切り替える」だけ。移動しない＝白い画面を挟まない */
+  .view { display: none; }
+  .view.on { display: block; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 16px; margin-bottom: 12px;
+  }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  p { margin: 0 0 10px; }
+  .sub { font-size: 13px; color: var(--muted); }
+
+  /* 🔴 タップ先は48px以上（店頭で立って・急いで押す） */
+  .btn {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    min-height: 60px; padding: 12px 16px; margin-bottom: 10px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    font: inherit; font-weight: 700; color: var(--fg); text-align: left; cursor: pointer;
+  }
+  .btn:active { background: #f2ece2; }
+  .btn .t { flex: 1; }
+  .btn .d { display: block; font-weight: 400; font-size: 12.5px; color: var(--muted); }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); justify-content: center; }
+  .btn.primary .t { flex: 0; }
+
+  input[type="tel"], input[type="text"], input[type="number"] {
+    width: 100%; min-height: 52px; padding: 10px 12px;
+    border: 1px solid var(--line); border-radius: 12px;
+    font: inherit; background: #fff; color: var(--fg);
+  }
+  label.f { display: block; margin-bottom: 12px; }
+  label.f > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+
+  .msg { font-size: 14px; margin-top: 10px; min-height: 1.6em; }
+  .msg.err { color: var(--danger); font-weight: 700; }
+  .msg.ok { color: var(--ok); font-weight: 700; }
+
+  /* 通信中は「止まっている」と見えないようにする */
+  #busy {
+    position: fixed; left: 0; right: 0; top: 0; height: 3px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    background-size: 40% 100%; background-repeat: no-repeat;
+    animation: slide 1.1s linear infinite; display: none; z-index: 20;
+  }
+  @keyframes slide { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+</style>
+</head>
+<body>
+<div id="busy"></div>
+
+<header>
+  <button id="back" type="button" aria-label="ひとつ戻る">←</button>
+  <div id="here">商品管理</div>
+  <div id="who"></div>
+</header>
+
+<main>
+  <!-- ① 鍵がない（この端末はまだ登録されていない） -->
+  <section class="view" id="v-nokey">
+    <div class="card">
+      <h2>この端末はまだ登録されていません</h2>
+      <p>オーナーから渡された<b>アクセスキーQR</b>を、この端末のカメラで読み取ってください。</p>
+      <p class="sub">読み取ったあとの画面から、そのままホーム画面に追加してください。次からはアイコンだけで入れます。</p>
+    </div>
+  </section>
+
+  <!-- ② PIN -->
+  <section class="view" id="v-pin">
+    <div class="card">
+      <h2 id="pin-title">PINを入れてください</h2>
+      <label class="f">
+        <span>数字だけ</span>
+        <input type="tel" id="pin" inputmode="numeric" autocomplete="one-time-code"
+               pattern="[0-9]*" maxlength="12" placeholder="••••">
+      </label>
+      <button class="btn primary" id="pin-go" type="button"><span class="t">はいる</span></button>
+      <div class="msg" id="pin-msg"></div>
+    </div>
+  </section>
+
+  <!-- ③ ホーム（何をするか選ぶ） -->
+  <section class="view" id="v-home">
+    <button class="btn" data-go="quickreg">
+      <span class="t">QRを貼って登録する<span class="d">棚の前で、ラベルを貼って写真を撮る</span></span>
+    </button>
+    <button class="btn" data-go="sale">
+      <span class="t">売上を入れる<span class="d">レジで売れたものを記録する</span></span>
+    </button>
+    <button class="btn" data-go="search">
+      <span class="t">QRで探す・直す<span class="d">値段や補足を書き足す</span></span>
+    </button>
+    <button class="btn" data-go="pricing">
+      <span class="t">未値付けに値段をつける<span class="d">まだ値段の無いものを続けて</span></span>
+    </button>
+    <div class="card sub" style="margin-top:14px;">
+      いまはまだ作っている途中です。<b>これまでの管理ページもそのまま使えます。</b>
+    </div>
+  </section>
+
+  <!-- ④ 各画面（中身はこれから足す） -->
+  <!-- 🔴 ふだんは通らない画面。裏で用意が済んでいれば、押した瞬間に /quickreg/ へ飛ぶ。
+       ここが出るのは「用意が間に合わなかった」「取れなかった」時だけ＝
+       何が起きているかを見せるための画面。行き止まりにしない。 -->
+  <section class="view" id="v-quickreg">
+    <div class="card">
+      <h2>QRを貼って登録する</h2>
+      <div class="msg" id="qr-msg">準備しています…</div>
+      <button class="btn primary" id="qr-retry" type="button" style="margin-top:12px;">
+        <span class="t">もう一度ためす</span>
+      </button>
+    </div>
+  </section>
+  <section class="view" id="v-sale"><div class="card"><h2>売上を入れる</h2><p class="sub">準備中</p></div></section>
+  <section class="view" id="v-search"><div class="card"><h2>QRで探す・直す</h2><p class="sub">準備中</p></div></section>
+  <section class="view" id="v-pricing"><div class="card"><h2>未値付けに値段をつける</h2><p class="sub">準備中</p></div></section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  // ==========================================================================
+  // 商品管理（C構成の骨組み）— 2026-08-01
+  //
+  // 何が今までと違うか:
+  //   ・ここは**自社ドメイン**。GASは画面を持たず、JSONを返すだけ。
+  //   ・画面は**切り替えるだけ**（移動しない）＝白い画面もGoogleの注意表示も出ない。
+  //   ・端末の記憶とURLの両方から鍵を拾う（ホーム画面から開いた時も入れるように）。
+  //
+  // 🔴 なぜ素の fetch で足りるのか（2026-08-01 実測）
+  //   GASの `doPost`（ContentService）は **Access-Control-Allow-Origin: * を返す**。
+  //   `doGet`（HTMLのページ）には付かないので、そちらを測って
+  //   「CORSは通らない」と誤断していた。かんたんQR登録（/quickreg/）は
+  //   ずっと前からこの形で動いている＝**発明ではなく踏襲**。
+  // ==========================================================================
+
+  var API = "";              // GASの /exec。鍵と一緒に受け取って覚える
+  var KEY = "";              // アクセスキー（人ごと・刷り直せる）
+  var SESSION = "";          // GASが返す adminSession（役割はサーバが毎回引き直す）
+  var WHO = "";
+
+  var K_KEY = "takahashi-kanri-key";
+  var K_API = "takahashi-kanri-api";
+  var K_SES = "takahashi-kanri-session";
+
+  function $(id) { return document.getElementById(id); }
+  function qs(n) {
+    var m = new RegExp("[?&]" + n + "=([^&]*)").exec(location.search);
+    return m ? decodeURIComponent(m[1].replace(/\+/g, " ")) : "";
+  }
+  function get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
+  function set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* 覚えられなくても今回は動く */ } }
+
+  // ---- 画面（移動しない） --------------------------------------------------
+  var TITLE = {
+    "nokey": "商品管理", "pin": "商品管理", "home": "商品管理",
+    "quickreg": "QRを貼って登録する", "sale": "売上を入れる",
+    "search": "QRで探す・直す", "pricing": "値段をつける"
+  };
+  var stack = [];
+  function show(name, push) {
+    var v = $("v-" + name);
+    if (!v) return;
+    var all = document.querySelectorAll(".view");
+    for (var i = 0; i < all.length; i++) all[i].classList.remove("on");
+    v.classList.add("on");
+    $("here").textContent = TITLE[name] || "商品管理";
+    if (push !== false) stack.push(name);
+    // 🔴 戻るは「ホームより上」でだけ出す。最下層で出すと押しても何も起きず、壊れて見える。
+    $("back").style.display = (stack.length > 1 && name !== "pin" && name !== "nokey") ? "flex" : "none";
+    window.scrollTo(0, 0);
+  }
+  $("back").addEventListener("click", function () {
+    if (stack.length <= 1) return;
+    stack.pop();
+    show(stack[stack.length - 1], false);
+  });
+
+  // 🔴 端末の戻る（ジェスチャー）も同じ道を通す。
+  //    履歴を1段積んでおき、popstate で1段戻す。最下層では**離脱させない**
+  //    （入力の途中で外へ出ると、書いたものが消える）。
+  //    URLは変えない＝ホーム画面に焼かれたURL（鍵つき）を壊さない。
+  var navSuppress = false;
+  function pushHistory() {
+    if (navSuppress) return;
+    try { history.pushState({ kanri: stack.length }, ""); } catch (e) { /* 履歴が無い環境 */ }
+  }
+  window.addEventListener("popstate", function () {
+    if (stack.length <= 1) { pushHistory(); return; }
+    navSuppress = true;
+    stack.pop();
+    show(stack[stack.length - 1], false);
+    navSuppress = false;
+    pushHistory();
+  });
+
+  function go(name) { show(name); pushHistory(); }
+  var btns = document.querySelectorAll("[data-go]");
+  for (var i = 0; i < btns.length; i++) {
+    (function (b) {
+      b.addEventListener("click", function () {
+        var name = b.getAttribute("data-go");
+        // 🔴 QR登録だけは**画面を出さずに飛ぶ**（用意が済んでいれば1タップ）。
+        //    間に合っていないときだけ画面を出して、何が起きているかを見せる。
+        if (name === "quickreg") { openQuickReg(); return; }
+        go(name);
+      });
+    })(btns[i]);
+  }
+
+  // ---- 通信 ----------------------------------------------------------------
+  var busyCount = 0;
+  function busy(on) {
+    busyCount += on ? 1 : -1;
+    if (busyCount < 0) busyCount = 0;
+    $("busy").style.display = busyCount > 0 ? "block" : "none";
+  }
+
+  /// GASを呼ぶ。**text/plain で投げる**のが要点（preflightが起きない＝OPTIONSは405で落ちる）。
+  /// 🔴 応答は必ず ok を見る。エラーを握りつぶすと「失敗が成功に見える」。
+  function call(action, data) {
+    if (!API) return Promise.reject(new Error("接続先が分かりません。アクセスキーQRを読み直してください。"));
+    var body = { action: action, data: Object.assign({}, data || {}) };
+    if (SESSION) body.data.adminSession = SESSION;
+    busy(true);
+    return fetch(API, {
+      method: "POST", mode: "cors", redirect: "follow",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      if (!r.ok) throw new Error("つながりませんでした（" + r.status + "）");
+      return r.json();
+    }).then(function (res) {
+      if (!res || !res.ok) {
+        throw new Error(String((res && res.error) || "不明なエラー").replace(/^Error:\s*/, ""));
+      }
+      return res.result;
+    }).catch(function (e) {
+      // 🔴 ブラウザが出す英語をそのまま見せない（店の人には意味が分からない）。
+      //    "Failed to fetch" は圏外・機内モード・接続先が違う のどれか。
+      //    ⚠️ ただし**握りつぶさない**。何が起きたかは伝えたうえで、次にやることを書く。
+      var m = String((e && e.message) || e || "");
+      if (/failed to fetch|networkerror|load failed/i.test(m)) {
+        throw new Error("電波が届いていないようです。つながる場所でもう一度お試しください。");
+      }
+      throw e;
+    }).finally(function () { busy(false); });
+  }
+
+  // ---- 鍵とセッション ------------------------------------------------------
+  // 🔴 鍵はURL（アクセスキーQR）から来る。読んだら端末に覚え、**URLからは消さない**。
+  //    消すと、ホーム画面に追加したときのURLに鍵が入らず、次から入れなくなる
+  //    （2026-07-31に実機で踏んだ。iOSのショートカットは別の保存領域を持つ）。
+  KEY = qs("k") || get(K_KEY);
+  API = qs("api") || get(K_API);
+  if (KEY) set(K_KEY, KEY);
+  if (API) set(K_API, API);
+  SESSION = get(K_SES);
+
+  // 接続先は script.google.com だけ（別のどこかへ鍵を送らせない）
+  if (API && API.indexOf("https://script.google.com/") !== 0) API = "";
+
+  function enter(session, who) {
+    SESSION = session || "";
+    WHO = who || "";
+    if (SESSION) set(K_SES, SESSION);
+    $("who").textContent = WHO;
+    stack = [];
+    go("home");
+    prefetchQuickReg();   // 押した瞬間に飛べるよう、裏で用意しておく
+  }
+
+  // ==========================================================================
+  // QRを貼って登録する（/quickreg/ へ渡す）
+  //
+  // 🔴 作り直さない。/quickreg/ は既に自社ドメインで動いていて、
+  //    **端末ごとのカメラの癖**（Galaxy=OSカメラ可／Oppo=ページ内カメラ必須）まで
+  //    解決済み。ここへ持ち込むと、その苦労をやり直すことになる。
+  //
+  // 🔴 移動は1回だけ残る。だが実測で **98KB / 0.27秒**（同じドメイン内）。
+  //    いままで挟んでいたGASは 240KB / 1.62秒 だったので、**6倍速い**。
+  //    しかもGoogleの注意表示もログインのやり直しも無い。
+  //
+  //    ⚠️ 押してからトークンを取ると「準備しています…」を挟むことになる（今までの形）。
+  //    ホームを出した時点で裏で取っておき、**押した瞬間に飛ぶ**ようにする。
+  // ==========================================================================
+  var QR_PRE = { url: "", expMs: 0, getting: false };
+  var QR_MIN_REMAIN_MS = 10 * 60 * 1000;   // 残り10分を切ったら取り直す（棚の前で切れないように）
+
+  function prefetchQuickReg() {
+    if (QR_PRE.getting) return;
+    if (QR_PRE.url && Date.now() < QR_PRE.expMs - QR_MIN_REMAIN_MS) return;
+    QR_PRE.getting = true;
+    call("issueQuickRegToken", {}).then(function (r) {
+      QR_PRE.url = (r && r.url) || "";
+      QR_PRE.expMs = (r && r.expMs) || (Date.now() + 30 * 60 * 1000);
+    }).catch(function () {
+      // 🔴 ここは黙って落ちてよい（押した時にもう一度取るので、行き止まりにはならない）。
+      //    ただし押した時の失敗は**必ず画面に出す**（下）。
+      QR_PRE.url = "";
+    }).finally(function () { QR_PRE.getting = false; });
+  }
+
+  function openQuickReg() {
+    // 用意が済んでいれば、画面を出さずにそのまま飛ぶ（1タップ）
+    if (QR_PRE.url && Date.now() < QR_PRE.expMs - QR_MIN_REMAIN_MS) {
+      location.href = QR_PRE.url;
+      return;
+    }
+    // 間に合っていないときだけ画面を出す＝待たされている理由が見える
+    go("quickreg");
+    var msg = $("qr-msg");
+    msg.className = "msg";
+    msg.textContent = "準備しています…";
+    call("issueQuickRegToken", {}).then(function (r) {
+      if (r && r.url) { location.href = r.url; return; }
+      msg.className = "msg err";
+      msg.textContent = "登録ページのURLを受け取れませんでした。もう一度お試しください。";
+    }).catch(function (e) {
+      msg.className = "msg err";
+      msg.textContent = e.message;
+    });
+  }
+  $("qr-retry").addEventListener("click", function () {
+    QR_PRE.url = "";           // 覚えている古いURLを捨ててから取り直す
+    openQuickReg();
+  });
+
+  function start() {
+    if (!KEY || !API) { show("nokey"); return; }
+    // 覚えているセッションで入れるか試す（PINを毎回聞かない）
+    if (SESSION) {
+      call("kanriWhoAmI", {}).then(function (r) {
+        enter(SESSION, (r && r.name) || "");
+      }).catch(function () {
+        SESSION = ""; set(K_SES, "");
+        askPin();
+      });
+      return;
+    }
+    askPin();
+  }
+
+  // PIN前の短命トークン（5分）。PIN画面を出している間だけ持つ。
+  var PRE = "";
+
+  function askPin() {
+    // 🔴 PINが要るかどうかは**サーバが決める**（人ごとに違う・設定していない人もいる）。
+    //    要らない人にPIN画面を見せない。
+    call("kanriOpen", { accessKey: KEY }).then(function (r) {
+      if (r && r.session) { enter(r.session, r.name); return; }
+      if (r && r.needPin) {
+        PRE = r.pre || "";
+        $("pin-title").textContent = (r.name ? r.name + " さんの" : "") + "PINを入れてください";
+        show("pin");
+        setTimeout(function () { $("pin").focus(); }, 50);
+        return;
+      }
+      // 🔴 想定していない返りを「たぶん大丈夫」で流さない。
+      show("nokey");
+    }).catch(function (e) {
+      // 鍵が使えない・電波が無い等。**理由をそのまま出す**（黙って入口へ戻さない）。
+      show("nokey");
+      var box = $("v-nokey").querySelector(".card");
+      var p = document.createElement("p");
+      p.className = "msg err";
+      p.textContent = e.message;
+      box.appendChild(p);
+    });
+  }
+
+  $("pin-go").addEventListener("click", function () {
+    var pin = String($("pin").value || "").trim();
+    if (!pin) { $("pin-msg").className = "msg err"; $("pin-msg").textContent = "PINを入れてください。"; return; }
+    if (!PRE) {
+      // 5分を過ぎて画面だけ残っている等。入口からやり直す。
+      $("pin-msg").className = "msg err";
+      $("pin-msg").textContent = "時間が経ちすぎました。もう一度読み込み直してください。";
+      return;
+    }
+    $("pin-msg").className = "msg"; $("pin-msg").textContent = "確かめています…";
+    // 🔴 照合は既存の verifyAdminPin（回数制限・ロックアウト込み）を通る口へ渡す。
+    //    ここで独自に判定しない＝締め出しの数え方が2か所に散らない。
+    call("kanriVerifyPin", { pre: PRE, pin: pin }).then(function (r) {
+      if (r && r.session) {
+        $("pin").value = ""; $("pin-msg").textContent = ""; PRE = "";
+        enter(r.session, r.name);
+        return;
+      }
+      $("pin-msg").className = "msg err";
+      $("pin-msg").textContent = "入れませんでした。もう一度お試しください。";
+    }).catch(function (e) {
+      // サーバが理由を日本語で返す（回数超過・期限切れ・無効化など）。そのまま見せる。
+      $("pin-msg").className = "msg err";
+      $("pin-msg").textContent = e.message;
+    });
+  });
+  $("pin").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") $("pin-go").click();
+  });
+
+  start();
+  pushHistory();
+})();
+</script>
+</body>
+</html>
