@@ -17,12 +17,17 @@
      管理ページのショートカットと**見分けがつかない**（どちらもタイトルの先頭1文字）。
      ・アイコン … apple-touch-icon は **PNGのみ**（SVGは無視される）
      ・名前    … apple-mobile-web-app-title が既定名になる（無ければ <title>） -->
-<link rel="apple-touch-icon" href="/icon-catalog-180.png">
-<link rel="icon" type="image/png" sizes="192x192" href="/icon-catalog-192.png">
+     🔴【2026-07-31】ここは**相対パス**にすること（`/icon-…` にしない）。
+        このページは2か所へ同じ物を置く＝オーナー名義ドメインの `/` と、自社ECの `/docs/catalog/`。
+        ルート基準で書くと自社EC側が `https://www.antique-takahashi.com/icon-catalog-180.png`
+        を見に行き、そこには何も無いのでアイコンが出ない（実際に出ていなかった）。
+        相対なら両方で正しい場所を指す。manifest.json の src / start_url / scope も同じ理由で相対。 -->
+<link rel="apple-touch-icon" href="icon-catalog-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-catalog-192.png">
 <meta name="apple-mobile-web-app-title" content="カタログ">
 <meta name="application-name" content="カタログ">
 <!-- Androidはここ（manifest）のicons/short_nameを見る。iPhoneは上の2行を見る。 -->
-<link rel="manifest" href="/manifest.json">
+<link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#faf7f2">
 <!--
   ===========================================================================
