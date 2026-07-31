@@ -155,6 +155,9 @@
     <button class="btn" data-go="pricing">
       <span class="t">未値付けに値段をつける<span class="d">まだ値段の無いものを続けて</span></span>
     </button>
+    <button class="btn" data-go="list">
+      <span class="t">商品一覧<span class="d">眺めて、ねだんやネット候補を入れる</span></span>
+    </button>
     <div class="card sub" style="margin-top:14px;">
       いまはまだ作っている途中です。<b>これまでの管理ページもそのまま使えます。</b>
     </div>
@@ -210,8 +213,46 @@
       <div id="sale-today" class="sub">読み込んでいます…</div>
     </div>
   </section>
-  <section class="view" id="v-search"><div class="card"><h2>QRで探す・直す</h2><p class="sub">準備中</p></div></section>
-  <section class="view" id="v-pricing"><div class="card"><h2>未値付けに値段をつける</h2><p class="sub">準備中</p></div></section>
+  <!-- QRで探す・直す: QR/IDから1点を開いて、ねだんと補足を書き足す
+       🔴 searchProducts は使わない（店舗の人は使えない口。原価が乗る全列を返すため）。
+          QR・IDの解決 → その1点だけ、が店舗モードの道。 -->
+  <section class="view" id="v-search">
+    <div class="card">
+      <label class="f">
+        <span>QRを読むか、商品ID（T-00123）を入れる</span>
+        <input type="text" id="sch-input" inputmode="text" autocomplete="off"
+               autocapitalize="off" spellcheck="false" placeholder="T-00123">
+      </label>
+      <button class="btn primary" id="sch-go" type="button"><span class="t">開く</span></button>
+      <div class="msg" id="sch-msg"></div>
+    </div>
+    <div id="sch-detail"></div>
+  </section>
+
+  <!-- 未値付けに値段をつける: 値段の無いものを続けて片付ける -->
+  <section class="view" id="v-pricing">
+    <div class="card">
+      <h2>値段のないもの <span id="pri-count" class="sub"></span></h2>
+      <div class="msg" id="pri-msg">読み込んでいます…</div>
+    </div>
+    <div id="pri-list"></div>
+  </section>
+
+  <!-- 商品一覧: 眺めて気づいたことを入れる（ねだん・ネット候補） -->
+  <section class="view" id="v-list">
+    <div class="card">
+      <label class="f">
+        <span>さがす言葉（空のままなら全部）</span>
+        <input type="text" id="lst-q" autocomplete="off" placeholder="鉄瓶 など">
+      </label>
+      <button class="btn primary" id="lst-go" type="button"><span class="t">さがす</span></button>
+      <div class="msg" id="lst-msg"></div>
+    </div>
+    <div id="lst-list"></div>
+    <button class="btn" id="lst-more" type="button" style="display:none;">
+      <span class="t">もっと見る</span>
+    </button>
+  </section>
 </main>
 
 <script>
@@ -664,6 +705,276 @@
     loadToday();
     setTimeout(function () { $("sale-input").focus(); }, 60);
   };
+
+  // ==========================================================================
+  // QRで探す・直す
+  //
+  // 🔴 searchProducts は使わない。GAS側の許可リストに
+  //    「searchProducts は**絶対に足さない**（store が旧お会計へ到達する・原価が乗る全列を返す）」
+  //    と明記されている。QR/IDを1点に解決してから、その1点だけ開く。
+  // 🔴 書けるのは補足メモ1列だけ（サーバ側の STORE_EDITABLE_FIELDS が絞る）。
+  //    ここで他の列を送っても通らない＝画面が弱くても権限は漏れない。
+  // ==========================================================================
+  function openDetail(masterId) {
+    var box = $("sch-detail");
+    box.innerHTML = '<div class="card sub">読み込んでいます…</div>';
+    call("getAdminProductDetail", { masterId: masterId }).then(function (d) {
+      if (!d) {
+        box.innerHTML = '<div class="card"><span class="msg err">この商品が見つかりません。</span></div>';
+        return;
+      }
+      var rev = d["更新バージョン"];
+      var memo = d["補足メモ"] || "";
+      box.innerHTML =
+        '<div class="card">' +
+        "<h2>" + esc(d["商品名"] || masterId) + "</h2>" +
+        '<div class="sub" style="margin-bottom:10px;">' + esc(masterId) +
+        "　" + (d["店頭価格"] === "" || d["店頭価格"] == null ? "値段まだ" : yen(d["店頭価格"])) +
+        "　" + esc(d["在庫ステータス"] || "") + "</div>" +
+        '<label class="f"><span>補足（気づいたことを足していく）</span>' +
+        '<textarea id="sch-memo" rows="5" style="width:100%;min-height:120px;padding:10px 12px;' +
+        'border:1px solid var(--line);border-radius:12px;font:inherit;background:#fff;' +
+        'color:var(--fg);">' + esc(memo) + "</textarea></label>" +
+        '<button class="btn primary" id="sch-save" type="button"><span class="t">補足を保存する</span></button>' +
+        '<div class="msg" id="sch-save-msg"></div>' +
+        "</div>";
+      $("sch-save").addEventListener("click", function () {
+        var m = $("sch-save-msg");
+        var v = String($("sch-memo").value || "");
+        $("sch-save").disabled = true;
+        m.className = "msg"; m.textContent = "保存しています…";
+        // 🔴 版数を必ず添える。無いとサーバが拒否する（古い内容で上書きさせない歯止め）。
+        call("updateProductFields", {
+          masterId: masterId,
+          patch: { "補足メモ": v, __expectedRev: rev }
+        }).then(function () {
+          m.className = "msg ok";
+          m.textContent = "保存しました。";
+          openDetail(masterId);   // 版数を取り直す（続けて直せるように）
+        }).catch(function (e) {
+          m.className = "msg err";
+          m.textContent = e.message;
+        }).finally(function () {
+          $("sch-save").disabled = false;
+        });
+      });
+    }).catch(function (e) {
+      box.innerHTML = '<div class="card"><span class="msg err">' + esc(e.message) + "</span></div>";
+    });
+  }
+
+  function schGo() {
+    var raw = String($("sch-input").value || "").trim();
+    var msg = $("sch-msg");
+    if (!raw) { msg.className = "msg err"; msg.textContent = "QRを読むか、商品IDを入れてください。"; return; }
+    msg.className = "msg"; msg.textContent = "探しています…";
+    call("resolveScanToMasterId", { rawText: raw }).then(function (id) {
+      if (!id) {
+        msg.className = "msg err";
+        msg.textContent = "この商品が見つかりません。IDを確かめてください。";
+        return;
+      }
+      msg.textContent = "";
+      openDetail(id);
+    }).catch(function (e) {
+      msg.className = "msg err";
+      msg.textContent = e.message;
+    });
+  }
+  $("sch-go").addEventListener("click", schGo);
+  $("sch-input").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); schGo(); }
+  });
+  ONSHOW["search"] = function () {
+    setTimeout(function () { $("sch-input").focus(); }, 60);
+  };
+
+  // ==========================================================================
+  // 未値付けに値段をつける
+  //
+  // 🔴 setStorePrice は**値段が空の品にしか書けない**（変更はできない）。
+  //    値段を直すのは商品一覧の storeChangePrice＝役割を混ぜない、という設計。
+  // ==========================================================================
+  function loadPricing() {
+    var msg = $("pri-msg");
+    var box = $("pri-list");
+    msg.className = "msg"; msg.textContent = "読み込んでいます…";
+    box.innerHTML = "";
+    call("listUnpricedForPricing", {}).then(function (rows) {
+      rows = rows || [];
+      $("pri-count").textContent = "（" + rows.length + "点）";
+      if (!rows.length) {
+        msg.className = "msg ok";
+        msg.textContent = "値段のないものはありません。";
+        return;
+      }
+      msg.textContent = "";
+      var h = "";
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
+        var id = r.masterId || r["マスターID"] || "";
+        var nm = r.name || r["商品名"] || id;
+        var rev = (r.rev != null ? r.rev : r["更新バージョン"]) || 0;
+        h += '<div class="card" data-id="' + esc(id) + '" data-rev="' + esc(rev) + '">' +
+             "<h2 style=\"font-size:15px;\">" + esc(nm) + "</h2>" +
+             '<div class="sub" style="margin-bottom:8px;">' + esc(id) + "</div>" +
+             '<div style="display:flex; gap:8px; align-items:flex-end;">' +
+             '<label class="f" style="flex:1; margin:0;"><span>ねだん（円）</span>' +
+             '<input type="number" class="pri-in" inputmode="numeric" min="1" placeholder="0"></label>' +
+             '<button type="button" class="btn primary pri-save" ' +
+             'style="width:auto; min-width:104px; margin:0;"><span class="t">つける</span></button>' +
+             "</div>" +
+             '<div class="msg pri-r"></div></div>';
+      }
+      box.innerHTML = h;
+      var cards = box.querySelectorAll(".card");
+      for (var j = 0; j < cards.length; j++) {
+        (function (c) {
+          c.querySelector(".pri-save").addEventListener("click", function () {
+            var input = c.querySelector(".pri-in");
+            var out = c.querySelector(".pri-r");
+            var price = Number(input.value || 0);
+            if (!price || price < 1) {
+              out.className = "msg pri-r err";
+              out.textContent = "ねだんを入れてください。";
+              return;
+            }
+            var btn = c.querySelector(".pri-save");
+            btn.disabled = true;
+            out.className = "msg pri-r"; out.textContent = "つけています…";
+            call("setStorePrice", {
+              masterId: c.getAttribute("data-id"),
+              price: price,
+              expectedRev: c.getAttribute("data-rev")
+            }).then(function () {
+              out.className = "msg pri-r ok";
+              out.textContent = "つけました。";
+              // 片付いたので、その場から消す（続けて次へ進める）
+              setTimeout(function () {
+                c.remove();
+                var left = box.querySelectorAll(".card").length;
+                $("pri-count").textContent = "（" + left + "点）";
+                if (!left) { msg.className = "msg ok"; msg.textContent = "全部つけ終わりました。"; }
+              }, 700);
+            }).catch(function (e) {
+              btn.disabled = false;
+              out.className = "msg pri-r err";
+              out.textContent = e.message;
+            });
+          });
+        })(cards[j]);
+      }
+    }).catch(function (e) {
+      // 🔴 読めなかったことを「0点」と混ぜない
+      msg.className = "msg err";
+      msg.textContent = "一覧が読めていません（0点ではありません）。" + e.message;
+      $("pri-count").textContent = "";
+    });
+  }
+  ONSHOW["pricing"] = loadPricing;
+
+  // ==========================================================================
+  // 商品一覧
+  //
+  // 🔴 オーナー方針「オーナーがガード機能」＝ここでは条件で弾かない。
+  //    代わりに、やったことは必ず記録に残る（サーバ側 logStoreChangeOrThrow_）。
+  // ==========================================================================
+  var LST = { offset: 0, limit: 50, keyword: "", done: false };
+
+  function lstRow(r) {
+    return '<div class="card" data-id="' + esc(r.masterId) + '" data-rev="' + esc(r.rev) + '">' +
+      "<h2 style=\"font-size:15px;\">" + esc(r.name || r.masterId) + "</h2>" +
+      '<div class="sub" style="margin-bottom:8px;">' + esc(r.masterId) +
+      (r.place ? "　" + esc(r.place) : "") +
+      (r.legal ? '　<span style="color:var(--danger);">法規の確認あり</span>' : "") +
+      "</div>" +
+      '<div style="display:flex; gap:8px; align-items:flex-end; margin-bottom:8px;">' +
+      '<label class="f" style="flex:1; margin:0;"><span>ねだん（円）</span>' +
+      '<input type="number" class="lst-price" inputmode="numeric" min="1" value="' +
+      (r.price == null ? "" : esc(r.price)) + '"></label>' +
+      '<button type="button" class="btn primary lst-save" ' +
+      'style="width:auto; min-width:104px; margin:0;"><span class="t">直す</span></button>' +
+      "</div>" +
+      '<button type="button" class="btn lst-cand" style="margin:0;">' +
+      '<span class="t">' + (r.netCand === "✓" ? "✓ ネット候補にしている" : "ネット候補にする") + "</span></button>" +
+      '<div class="msg lst-r"></div></div>';
+  }
+
+  function lstWire(c) {
+    var id = c.getAttribute("data-id");
+    var out = c.querySelector(".lst-r");
+    function rev() { return c.getAttribute("data-rev"); }
+    c.querySelector(".lst-save").addEventListener("click", function () {
+      var p = Number(c.querySelector(".lst-price").value || 0);
+      if (!p || p < 1) { out.className = "msg lst-r err"; out.textContent = "ねだんを入れてください。"; return; }
+      var b = c.querySelector(".lst-save");
+      b.disabled = true;
+      out.className = "msg lst-r"; out.textContent = "直しています…";
+      call("storeChangePrice", { masterId: id, price: p, expectedRev: rev() })
+        .then(function (res) {
+          out.className = "msg lst-r ok";
+          out.textContent = "直しました。オーナーの画面にも出ます。";
+          if (res && res.rev != null) c.setAttribute("data-rev", res.rev);
+        }).catch(function (e) {
+          out.className = "msg lst-r err"; out.textContent = e.message;
+        }).finally(function () { b.disabled = false; });
+    });
+    c.querySelector(".lst-cand").addEventListener("click", function () {
+      var b = c.querySelector(".lst-cand");
+      var on = b.querySelector(".t").textContent.indexOf("✓") !== 0;
+      b.disabled = true;
+      out.className = "msg lst-r"; out.textContent = "変えています…";
+      call("storeSetNetCandidate", { masterId: id, on: on, expectedRev: rev() })
+        .then(function (res) {
+          b.querySelector(".t").textContent = on ? "✓ ネット候補にしている" : "ネット候補にする";
+          out.className = "msg lst-r ok";
+          out.textContent = on ? "ネット候補にしました。" : "ネット候補から外しました。";
+          if (res && res.rev != null) c.setAttribute("data-rev", res.rev);
+        }).catch(function (e) {
+          out.className = "msg lst-r err"; out.textContent = e.message;
+        }).finally(function () { b.disabled = false; });
+    });
+  }
+
+  function loadList(more) {
+    var msg = $("lst-msg");
+    var box = $("lst-list");
+    if (!more) { LST.offset = 0; LST.done = false; box.innerHTML = ""; }
+    msg.className = "msg"; msg.textContent = "さがしています…";
+    $("lst-more").style.display = "none";
+    call("storeListProducts", {
+      opts: { keyword: LST.keyword, offset: LST.offset, limit: LST.limit }
+    }).then(function (res) {
+      var rows = (res && res.items) || res || [];
+      if (!Array.isArray(rows)) rows = [];
+      if (!rows.length && !LST.offset) {
+        msg.className = "msg";
+        msg.textContent = LST.keyword ? "見つかりませんでした。" : "まだ1点もありません。";
+        return;
+      }
+      msg.textContent = "";
+      var h = "";
+      for (var i = 0; i < rows.length; i++) h += lstRow(rows[i]);
+      box.insertAdjacentHTML("beforeend", h);
+      var cards = box.querySelectorAll(".card");
+      for (var j = cards.length - rows.length; j < cards.length; j++) lstWire(cards[j]);
+      LST.offset += rows.length;
+      // 満杯で返ってきたら、まだ先がある
+      $("lst-more").style.display = (rows.length >= LST.limit) ? "" : "none";
+    }).catch(function (e) {
+      msg.className = "msg err";
+      msg.textContent = "一覧が読めていません（0点ではありません）。" + e.message;
+    });
+  }
+  $("lst-go").addEventListener("click", function () {
+    LST.keyword = String($("lst-q").value || "").trim();
+    loadList(false);
+  });
+  $("lst-q").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); $("lst-go").click(); }
+  });
+  $("lst-more").addEventListener("click", function () { loadList(true); });
+  ONSHOW["list"] = function () { if (!$("lst-list").children.length) loadList(false); };
 
   function start() {
     if (!KEY || !API) { show("nokey"); return; }
