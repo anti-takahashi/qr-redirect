@@ -74,8 +74,11 @@
 
   <!-- ホーム画面に追加する案内 -->
   <div id="view-setup" hidden>
+    <p id="setup-registered" hidden
+       style="margin:0 0 10px;font-weight:700;color:#2f7a4d;">✓ この端末を登録しました</p>
     <h1>ホーム画面に追加する</h1>
-    <p style="margin:8px 0 4px;">追加すると、次からこのアイコンを押すだけで商品管理が開きます。</p>
+    <p style="margin:8px 0 4px;">追加すると、次からこのアイコンを押すだけで商品管理が開きます。<br>
+      <span class="sub">QRを読むのは、この1回だけです。</span></p>
 
     <div id="setup-android" hidden style="margin-top:14px;">
       <button class="go" id="install-btn" type="button">ホーム画面に追加</button>
@@ -97,8 +100,11 @@
       ✓ この端末では追加済みとして記録しました。<br>
       やり直したいときは、もう一度この画面を開いてください。
     </p>
-    <p style="margin-top:16px;">
-      <a class="ghost" id="skip" href="#">追加せずに商品管理をひらく</a>
+    <!-- 🔴 iOSには「追加された」を知らせる仕組みが無い（appinstalled が来ない）。
+         押して終える口を用意しないと、QRを読むたびにこの画面が出続ける。 -->
+    <p style="margin-top:16px; display:flex; flex-direction:column; gap:10px; align-items:center;">
+      <a class="go" id="skip" href="#">追加したので商品管理をひらく</a>
+      <a class="ghost" id="skip-keep" href="#">追加せずにひらく（次回もこの案内を出す）</a>
     </p>
   </div>
 
@@ -123,6 +129,13 @@
   function hide(id) { var n = el(id); if (n) n.hidden = true; }
 
   var setupMode = q("setup") === "1";
+
+  // 🔴【2026-07-31 オーナー指摘】「QRを読むと自動転送されてショートカットを作る暇がない」
+  //    QRを読んだ瞬間が**唯一の設定の機会**なのに、素通りさせていた。
+  //    ・QRから来た（?t= がある）＝ 端末を登録しにきた ＝ **止めて案内を出す**
+  //    ・ホーム画面のアイコンから来た（?t= が無い）＝ ふだんの入口 ＝ **すぐ飛ばす**
+  //    一度追加した端末では二度と出さない（ADDED_STORE）。
+  var cameFromQr = q("t") !== "";
 
   // ---- 鍵を決める（URLで渡されたら覚える。無ければ覚えているものを使う）----
   var key = q("t");
@@ -152,14 +165,24 @@
     : ADMIN + sep + "authuser=0";
   el("go").href = target;
   el("skip").href = target;
+  el("skip-keep").href = target;
+  // 「追加した」を押したときだけ覚える。押さずに開いた人には次回また案内を出す。
+  el("skip").addEventListener("click", function () {
+    try { localStorage.setItem(ADDED_STORE, "1"); } catch (e) {}
+  });
 
   // ---- どの画面を出すか ----
   var standalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
                    window.navigator.standalone === true;
 
-  if (setupMode && !standalone) {
+  var alreadyAdded = false;
+  try { alreadyAdded = !!localStorage.getItem(ADDED_STORE); } catch (e) {}
+
+  if ((setupMode || (cameFromQr && !alreadyAdded)) && !standalone) {
     hide("view-go");
     show("view-setup");
+    // QRから来たときは、まず「読めた」ことを見せる（黙って画面が変わると失敗に見える）
+    if (cameFromQr) show("setup-registered");
     var ua = navigator.userAgent;
     var isIOS = /iPad|iPhone|iPod/.test(ua) ||
                 (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
