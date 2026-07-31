@@ -17,9 +17,13 @@
      管理ページのショートカットと**見分けがつかない**（どちらもタイトルの先頭1文字）。
      ・アイコン … apple-touch-icon は **PNGのみ**（SVGは無視される）
      ・名前    … apple-mobile-web-app-title が既定名になる（無ければ <title>） -->
-<link rel="apple-touch-icon" href="/icon-catalog.png">
+<link rel="apple-touch-icon" href="/icon-catalog-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-catalog-192.png">
 <meta name="apple-mobile-web-app-title" content="カタログ">
 <meta name="application-name" content="カタログ">
+<!-- Androidはここ（manifest）のicons/short_nameを見る。iPhoneは上の2行を見る。 -->
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#faf7f2">
 <!--
   ===========================================================================
   自社ドメインだけで完結する表示用カタログ
