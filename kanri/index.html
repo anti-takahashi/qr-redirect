@@ -158,6 +158,19 @@
     <button class="btn" data-go="list">
       <span class="t">商品一覧<span class="d">眺めて、ねだんやネット候補を入れる</span></span>
     </button>
+    <!-- 🔴 管理モードはオーナーだけ。ここを隠すのは**見やすさのため**であって、
+         守っているのはサーバ側（requireAdmin_ が代表・手伝いを拒否する）。
+         画面から消すことを対策と呼ばない（CLAUDE.md「絞り込みはサーバ側で行う」）。 -->
+    <div id="home-admin" style="display:none;">
+      <div class="sub" style="margin:18px 0 8px;">オーナーのみ</div>
+      <button class="btn" data-go="edit">
+        <span class="t">QRで探して直す（詳しく）<span class="d">商品名・カテゴリ・説明まで直す</span></span>
+      </button>
+      <button class="btn" data-go="netlist">
+        <span class="t">QRからネット出品<span class="d">出せるか確かめて、出品リストへ送る</span></span>
+      </button>
+    </div>
+
     <div class="card sub" style="margin-top:14px;">
       いまはまだ作っている途中です。<b>これまでの管理ページもそのまま使えます。</b>
     </div>
@@ -252,6 +265,36 @@
     <button class="btn" id="lst-more" type="button" style="display:none;">
       <span class="t">もっと見る</span>
     </button>
+  </section>
+
+  <!-- ===== ここから管理モード（オーナーのみ） ===== -->
+
+  <!-- QRで探して直す（詳しく）: 店舗モードの「補足だけ」に対して、こちらは列を広く直せる -->
+  <section class="view" id="v-edit">
+    <div class="card">
+      <label class="f">
+        <span>QRを読むか、商品ID（T-00123）を入れる</span>
+        <input type="text" id="edt-input" autocomplete="off" autocapitalize="off"
+               spellcheck="false" placeholder="T-00123">
+      </label>
+      <button class="btn primary" id="edt-go" type="button"><span class="t">開く</span></button>
+      <div class="msg" id="edt-msg"></div>
+    </div>
+    <div id="edt-detail"></div>
+  </section>
+
+  <!-- QRからネット出品: 出せるか確かめて、出品リストへ送る -->
+  <section class="view" id="v-netlist">
+    <div class="card">
+      <label class="f">
+        <span>QRを読むか、商品ID（T-00123）を入れる</span>
+        <input type="text" id="net-input" autocomplete="off" autocapitalize="off"
+               spellcheck="false" placeholder="T-00123">
+      </label>
+      <button class="btn primary" id="net-go" type="button"><span class="t">確かめる</span></button>
+      <div class="msg" id="net-msg"></div>
+    </div>
+    <div id="net-detail"></div>
   </section>
 </main>
 
@@ -420,11 +463,16 @@
   // 接続先は script.google.com だけ（別のどこかへ鍵を送らせない）
   if (API && API.indexOf("https://script.google.com/") !== 0) API = API_DEFAULT;
 
-  function enter(session, who) {
+  function enter(session, who, role) {
     SESSION = session || "";
     WHO = who || "";
     if (SESSION) set(K_SES, SESSION);
     $("who").textContent = WHO;
+    // 🔴 管理モードを出すかどうかは**サーバが返した役割**だけで決める。
+    //    覚えている値や画面の状態から推測しない。
+    //    ⚠️ ここで出さなくても守りにはならない（守るのはサーバ側の requireAdmin_）。
+    //       出す理由は「代表・手伝いに、押しても拒否される道を見せない」ため。
+    $("home-admin").style.display = (role === "master") ? "" : "none";
     stack = [];
     go("home");
     prefetchQuickReg();   // 押した瞬間に飛べるよう、裏で用意しておく
@@ -976,12 +1024,218 @@
   $("lst-more").addEventListener("click", function () { loadList(true); });
   ONSHOW["list"] = function () { if (!$("lst-list").children.length) loadList(false); };
 
+  // ==========================================================================
+  // ここから管理モード（オーナーのみ）
+  //
+  // 🔴 見せる／隠すは**見やすさのため**。守っているのはサーバ側で、
+  //    代表・手伝いのセッションでは requireAdmin_ がこれらの操作を拒否する。
+  //    画面から消すことを対策と呼ばない（CLAUDE.md「絞り込みはサーバ側で行う」）。
+  // ==========================================================================
+
+  /// 直してよい列。🔴 ここに無い列は画面に出さない。
+  ///   出す＝直せると見えることなので、直せない列を並べると「保存できない画面」になる。
+  var EDIT_FIELDS = [
+    ["商品名", "text"],
+    ["カテゴリ", "select"],
+    ["保管場所", "text"],
+    ["店頭価格", "number"],
+    ["実寸サイズ", "text"],
+    ["状態メモ", "textarea"],
+    ["補足メモ", "textarea"]
+  ];
+  var CATEGORY_OPTIONS = null;   // 一度取ったら覚える
+
+  function editRender(masterId, d) {
+    var rev = d["更新バージョン"];
+    var h = '<div class="card"><h2>' + esc(d["商品名"] || masterId) + "</h2>" +
+            '<div class="sub" style="margin-bottom:10px;">' + esc(masterId) +
+            "　" + esc(d["在庫ステータス"] || "") + "</div>";
+    for (var i = 0; i < EDIT_FIELDS.length; i++) {
+      var name = EDIT_FIELDS[i][0], kind = EDIT_FIELDS[i][1];
+      var v = d[name] == null ? "" : String(d[name]);
+      h += '<label class="f"><span>' + esc(name) + "</span>";
+      if (kind === "textarea") {
+        h += '<textarea data-f="' + esc(name) + '" rows="4" style="width:100%;min-height:96px;' +
+             'padding:10px 12px;border:1px solid var(--line);border-radius:12px;font:inherit;' +
+             'background:#fff;color:var(--fg);">' + esc(v) + "</textarea>";
+      } else if (kind === "select") {
+        h += '<select data-f="' + esc(name) + '" class="input" style="width:100%;min-height:52px;">' +
+             '<option value="">（未設定）</option>';
+        var opts = CATEGORY_OPTIONS || [];
+        var found = false;
+        for (var k = 0; k < opts.length; k++) {
+          var o = String(opts[k]);
+          if (o === v) found = true;
+          h += '<option value="' + esc(o) + '"' + (o === v ? " selected" : "") + ">" + esc(o) + "</option>";
+        }
+        // 🔴 いまの値が選択肢に無いとき、黙って「（未設定）」にしない（保存すると消える）
+        if (v && !found) h += '<option value="' + esc(v) + '" selected>' + esc(v) + "（いまの値）</option>";
+        h += "</select>";
+      } else {
+        h += '<input type="' + (kind === "number" ? "number" : "text") + '" data-f="' + esc(name) +
+             '" value="' + esc(v) + '">';
+      }
+      h += "</label>";
+    }
+    h += '<button class="btn primary" id="edt-save" type="button"><span class="t">保存する</span></button>' +
+         '<div class="msg" id="edt-save-msg"></div></div>';
+    $("edt-detail").innerHTML = h;
+
+    $("edt-save").addEventListener("click", function () {
+      var m = $("edt-save-msg");
+      var patch = { __expectedRev: rev };
+      var changed = 0;
+      var fields = $("edt-detail").querySelectorAll("[data-f]");
+      for (var j = 0; j < fields.length; j++) {
+        var f = fields[j];
+        var nm = f.getAttribute("data-f");
+        var now = String(f.value == null ? "" : f.value);
+        var was = d[nm] == null ? "" : String(d[nm]);
+        // 🔴 変えていない列は送らない。全部送ると、他の人が直した列まで
+        //    自分が読んだ古い値で上書きしてしまう。
+        if (now !== was) { patch[nm] = now; changed += 1; }
+      }
+      if (!changed) { m.className = "msg"; m.textContent = "変わっていません。"; return; }
+      $("edt-save").disabled = true;
+      m.className = "msg"; m.textContent = "保存しています…";
+      call("updateProductFields", { masterId: masterId, patch: patch }).then(function () {
+        m.className = "msg ok";
+        m.textContent = changed + "か所を保存しました。";
+        editOpen(masterId);      // 版数を取り直す
+      }).catch(function (e) {
+        m.className = "msg err";
+        m.textContent = e.message;
+      }).finally(function () { $("edt-save").disabled = false; });
+    });
+  }
+
+  function editOpen(masterId) {
+    $("edt-detail").innerHTML = '<div class="card sub">読み込んでいます…</div>';
+    var need = CATEGORY_OPTIONS ? Promise.resolve(CATEGORY_OPTIONS)
+      : call("getCategoryOptions", {}).then(function (o) {
+          CATEGORY_OPTIONS = (o && o.categories) || o || [];
+          return CATEGORY_OPTIONS;
+        }).catch(function () {
+          // 🔴 選択肢が取れなくても編集は続けられる（いまの値は上で残す）
+          CATEGORY_OPTIONS = [];
+          return CATEGORY_OPTIONS;
+        });
+    need.then(function () {
+      return call("getAdminProductDetail", { masterId: masterId });
+    }).then(function (d) {
+      if (!d) {
+        $("edt-detail").innerHTML = '<div class="card"><span class="msg err">この商品が見つかりません。</span></div>';
+        return;
+      }
+      editRender(masterId, d);
+    }).catch(function (e) {
+      $("edt-detail").innerHTML = '<div class="card"><span class="msg err">' + esc(e.message) + "</span></div>";
+    });
+  }
+
+  function edtGo() {
+    var raw = String($("edt-input").value || "").trim();
+    var msg = $("edt-msg");
+    if (!raw) { msg.className = "msg err"; msg.textContent = "QRを読むか、商品IDを入れてください。"; return; }
+    msg.className = "msg"; msg.textContent = "探しています…";
+    call("resolveScanToMasterId", { rawText: raw }).then(function (id) {
+      if (!id) { msg.className = "msg err"; msg.textContent = "この商品が見つかりません。"; return; }
+      msg.textContent = "";
+      editOpen(id);
+    }).catch(function (e) { msg.className = "msg err"; msg.textContent = e.message; });
+  }
+  $("edt-go").addEventListener("click", edtGo);
+  $("edt-input").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); edtGo(); }
+  });
+  ONSHOW["edit"] = function () { setTimeout(function () { $("edt-input").focus(); }, 60); };
+
+  // ---- QRからネット出品 ----------------------------------------------------
+  function netRender(masterId, el) {
+    var ok = !!(el && el.eligible);
+    var reasons = (el && (el.blockers || el.reasons)) || [];
+    if (!Array.isArray(reasons)) reasons = [reasons];
+    var h = '<div class="card"><h2>' + esc((el && el.name) || masterId) + "</h2>" +
+            '<div class="sub" style="margin-bottom:10px;">' + esc(masterId) + "</div>";
+    if (ok) {
+      h += '<div class="msg ok" style="margin-bottom:10px;">ネットに出せます。</div>' +
+           '<button class="btn primary" id="net-add" type="button">' +
+           '<span class="t">出品リストへ送る</span></button>';
+    } else {
+      // 🔴 出せない理由を必ず出す。「出せません」だけだと、棚の前で手が止まる。
+      h += '<div class="msg err" style="margin-bottom:6px;">まだ出せません。</div>';
+      if (reasons.length) {
+        h += "<ul style=\"margin:0 0 10px 18px; font-size:14px;\">";
+        for (var i = 0; i < reasons.length; i++) h += "<li>" + esc(reasons[i]) + "</li>";
+        h += "</ul>";
+      } else {
+        h += '<div class="sub" style="margin-bottom:10px;">理由がサーバから返っていません。' +
+             "管理ページで確かめてください。</div>";
+      }
+      h += '<button class="btn" id="net-edit" type="button">' +
+           '<span class="t">この品を直しに行く</span></button>';
+    }
+    h += '<button class="btn" id="net-shot" type="button" style="margin-top:8px;">' +
+         '<span class="t">ぐるっと撮る（ターンテーブル）</span></button>' +
+         '<div class="msg" id="net-r"></div></div>';
+    $("net-detail").innerHTML = h;
+
+    if (ok) {
+      $("net-add").addEventListener("click", function () {
+        var r = $("net-r");
+        $("net-add").disabled = true;
+        r.className = "msg"; r.textContent = "送っています…";
+        call("addToNetListingQueue", { masterId: masterId }).then(function () {
+          r.className = "msg ok";
+          r.textContent = "出品リストへ送りました。出す／出さないはPC版で決めます。";
+        }).catch(function (e) {
+          $("net-add").disabled = false;
+          r.className = "msg err"; r.textContent = e.message;
+        });
+      });
+    } else {
+      $("net-edit").addEventListener("click", function () {
+        $("edt-input").value = masterId;
+        go("edit");
+        editOpen(masterId);
+      });
+    }
+    $("net-shot").addEventListener("click", function () {
+      var r = $("net-r");
+      r.className = "msg"; r.textContent = "撮影ページを用意しています…";
+      call("issueTurntableCaptureToken", { masterId: masterId }).then(function (res) {
+        if (res && res.url) { location.href = res.url; return; }
+        r.className = "msg err";
+        r.textContent = "撮影ページのURLを受け取れませんでした。";
+      }).catch(function (e) { r.className = "msg err"; r.textContent = e.message; });
+    });
+  }
+
+  function netGo() {
+    var raw = String($("net-input").value || "").trim();
+    var msg = $("net-msg");
+    if (!raw) { msg.className = "msg err"; msg.textContent = "QRを読むか、商品IDを入れてください。"; return; }
+    msg.className = "msg"; msg.textContent = "確かめています…";
+    call("resolveScanToMasterId", { rawText: raw }).then(function (id) {
+      if (!id) { msg.className = "msg err"; msg.textContent = "この商品が見つかりません。"; return; }
+      return call("getNetListingEligibility", { masterId: id }).then(function (el) {
+        msg.textContent = "";
+        netRender(id, el);
+      });
+    }).catch(function (e) { msg.className = "msg err"; msg.textContent = e.message; });
+  }
+  $("net-go").addEventListener("click", netGo);
+  $("net-input").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); netGo(); }
+  });
+  ONSHOW["netlist"] = function () { setTimeout(function () { $("net-input").focus(); }, 60); };
+
   function start() {
     if (!KEY || !API) { show("nokey"); return; }
     // 覚えているセッションで入れるか試す（PINを毎回聞かない）
     if (SESSION) {
       call("kanriWhoAmI", {}).then(function (r) {
-        enter(SESSION, (r && r.name) || "");
+        enter(SESSION, (r && r.name) || "", (r && r.role) || "");
       }).catch(function () {
         SESSION = ""; set(K_SES, "");
         askPin();
@@ -998,7 +1252,7 @@
     // 🔴 PINが要るかどうかは**サーバが決める**（人ごとに違う・設定していない人もいる）。
     //    要らない人にPIN画面を見せない。
     call("kanriOpen", { accessKey: KEY }).then(function (r) {
-      if (r && r.session) { enter(r.session, r.name); return; }
+      if (r && r.session) { enter(r.session, r.name, r.role); return; }
       if (r && r.needPin) {
         PRE = r.pre || "";
         $("pin-title").textContent = (r.name ? r.name + " さんの" : "") + "PINを入れてください";
@@ -1034,7 +1288,7 @@
     call("kanriVerifyPin", { pre: PRE, pin: pin }).then(function (r) {
       if (r && r.session) {
         $("pin").value = ""; $("pin-msg").textContent = ""; PRE = "";
-        enter(r.session, r.name);
+        enter(r.session, r.name, r.role);
         return;
       }
       $("pin-msg").className = "msg err";
