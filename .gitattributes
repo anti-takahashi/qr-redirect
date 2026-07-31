@@ -2,3 +2,14 @@
 # 🔴 このPCは core.autocrlf=true（system設定）。これが無いと clone のたびに作業コピーが
 #    CRLFになり、**1文字も直していないのに公開物のmd5が変わる**（2026-07-29に実害）。
 * text eol=lf
+
+# 🔴【2026-07-31】画像は**バイナリ**。上の `* text eol=lf` を当てると、
+#    PNGの中の 0D 0A が 0A に潰されて**ファイルが壊れる**（数バイト短くなる）。
+#    HTTPは200を返すので気づけず、公開後のmd5照合で初めて分かった。
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.pdf binary
