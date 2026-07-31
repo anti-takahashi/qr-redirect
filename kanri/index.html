@@ -307,14 +307,23 @@
   // 🔴 鍵はURL（アクセスキーQR）から来る。読んだら端末に覚え、**URLからは消さない**。
   //    消すと、ホーム画面に追加したときのURLに鍵が入らず、次から入れなくなる
   //    （2026-07-31に実機で踏んだ。iOSのショートカットは別の保存領域を持つ）。
+  // 🔴 GASの宛先は**既定で持つ**。理由は2つ:
+  //   ① URLが短くなる＝これから焼くアクセスキーQRのマス目が減って読み取りが速くなる
+  //   ② 打ち間違えようが無くなる（api= を手で書かせない）
+  //   ⚠️ 引数の api= が来たらそちらを優先する（デプロイを移したときの逃げ道を残す）。
+  //   ⚠️ ここは admin-app の /exec。**変えるときは deploy ID ごと**。
+  //      引数なしの clasp deploy でIDが変わると、ここも直さないと繋がらなくなる。
+  var API_DEFAULT = "https://script.google.com/macros/s/" +
+    "AKfycbw2BGhgYrZujEVnpxEgkJsurAWLKD-KUZuMEuxb3ig302pBt7K1wE15a5Af3yaqCaoN/exec";
+
   KEY = qs("k") || get(K_KEY);
-  API = qs("api") || get(K_API);
+  API = qs("api") || get(K_API) || API_DEFAULT;
   if (KEY) set(K_KEY, KEY);
   if (API) set(K_API, API);
   SESSION = get(K_SES);
 
   // 接続先は script.google.com だけ（別のどこかへ鍵を送らせない）
-  if (API && API.indexOf("https://script.google.com/") !== 0) API = "";
+  if (API && API.indexOf("https://script.google.com/") !== 0) API = API_DEFAULT;
 
   function enter(session, who) {
     SESSION = session || "";
