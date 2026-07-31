@@ -142,7 +142,14 @@
   //    案内を出すかどうかは、この時点で読み取った setupMode（JSの変数）だけで決める。
   try { history.replaceState(null, "", location.pathname); } catch (e) {}
 
-  var target = ADMIN + (key ? (ADMIN.indexOf("?") >= 0 ? "&" : "?") + "k=" + encodeURIComponent(key) : "");
+  // 🔴 authuser=0 を必ず付ける。Googleに複数アカウントでログインしている端末では、
+  //    これが無いと /macros/s/… が /macros/u/1/s/… へ書き換えられて**404になる**
+  //    （2026-07-29に実測。キーQR側は2026-07-30に塞いだが、宛先をここへ移すと
+  //     GASへ渡すのはこの中継の役目になるので、塞ぎ直すのはここ）。
+  var sep = ADMIN.indexOf("?") >= 0 ? "&" : "?";
+  var target = key
+    ? ADMIN + sep + "authuser=0&k=" + encodeURIComponent(key)
+    : ADMIN + sep + "authuser=0";
   el("go").href = target;
   el("skip").href = target;
 
