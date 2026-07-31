@@ -76,9 +76,17 @@
   <div id="view-setup" hidden>
     <p id="setup-registered" hidden
        style="margin:0 0 10px;font-weight:700;color:#2f7a4d;">✓ この端末を登録しました</p>
-    <h1>ホーム画面に追加する</h1>
+    <h1>このページをホーム画面に追加</h1>
     <p style="margin:8px 0 4px;">追加すると、次からこのアイコンを押すだけで商品管理が開きます。<br>
       <span class="sub">QRを読むのは、この1回だけです。</span></p>
+    <!-- 🔴 いま開いているURLに鍵が入っている。**この画面のまま**追加してもらう必要がある
+         （別のページへ移ってから追加すると鍵が入らない＝「まだ登録されていません」に戻る）。 -->
+    <p id="setup-keep-url" hidden
+       style="margin:10px 0 0;padding:12px 14px;border-radius:12px;
+              background:rgba(124,106,79,.14);font-weight:700;">
+      ⚠️ 先に「商品管理をひらく」を押さないでください。<br>
+      <span style="font-weight:400;">この画面のまま追加すると、鍵ごと保存されます。</span>
+    </p>
 
     <div id="setup-android" hidden style="margin-top:14px;">
       <button class="go" id="install-btn" type="button">ホーム画面に追加</button>
@@ -145,6 +153,28 @@
     try { key = localStorage.getItem(KEY_STORE) || ""; } catch (e) { key = ""; }
   }
 
+  var standalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+                   window.navigator.standalone === true;
+  var alreadyAdded = false;
+  try { alreadyAdded = !!localStorage.getItem(ADDED_STORE); } catch (e) {}
+  var showSetup = (setupMode || (cameFromQr && !alreadyAdded)) && !standalone;
+
+  // 🔴【2026-07-31・実機で2回外した】ホーム画面から開くと「まだ登録されていません」になる。
+  //    1回目の見立て（アプリ内ブラウザで読んだから別の保存領域）は**外れた**。
+  //    Safariで読み直しても直らなかった＝iOSのホーム画面ショートカットは
+  //    **Safariとは別の localStorage を持ちうる**。
+  //    ＝「鍵は端末に覚える／URLからは消す」という作りは、iPhoneでは原理的に成立しない。
+  //
+  //    🔴 原因を当てにいくのをやめて、**どちらでも動く形**にする＝
+  //       ホーム画面に追加してもらう**その瞬間だけ**、アドレス欄に鍵を残す。
+  //       ショートカットのURLに鍵が焼き付くので、保存領域が分かれていても関係なくなる。
+  //
+  //    ⚠️ 引き換えに、鍵はブックマークのURLに残る（画面写し・共有で見える）。
+  //       これは**管理ページのPINが別に要る**ことと、鍵は1人1枚で刷り直せることで受ける。
+  //       ここを「漏れないほうが安全だから」と戻すと、**そもそも使えない**画面に戻る。
+  //
+  //    案内を出さないとき（ふだんの入口）は、今までどおり消す。
+  if (!showSetup) {
   // 🔴【2026-07-31・検証で発覚】アドレス欄には**何も残さない**。
   //    もとは案内モードのとき `?setup=1` を残していたが、
   //    manifest の display が "browser" のときホーム画面への追加は
@@ -153,7 +183,8 @@
   //    `?setup=1` が付いたまま追加されると、アイコンを押すたびに案内画面が出て
   //    商品管理へ入るのに毎回もう1タップ要る＝この中継を作った意味が消える。
   //    案内を出すかどうかは、この時点で読み取った setupMode（JSの変数）だけで決める。
-  try { history.replaceState(null, "", location.pathname); } catch (e) {}
+    try { history.replaceState(null, "", location.pathname); } catch (e) {}
+  }
 
   // 🔴 authuser=0 を必ず付ける。Googleに複数アカウントでログインしている端末では、
   //    これが無いと /macros/s/… が /macros/u/1/s/… へ書き換えられて**404になる**
@@ -171,18 +202,12 @@
     try { localStorage.setItem(ADDED_STORE, "1"); } catch (e) {}
   });
 
-  // ---- どの画面を出すか ----
-  var standalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
-                   window.navigator.standalone === true;
-
-  var alreadyAdded = false;
-  try { alreadyAdded = !!localStorage.getItem(ADDED_STORE); } catch (e) {}
-
-  if ((setupMode || (cameFromQr && !alreadyAdded)) && !standalone) {
+  // ---- どの画面を出すか（standalone / alreadyAdded / showSetup は上で決めてある）----
+  if (showSetup) {
     hide("view-go");
     show("view-setup");
     // QRから来たときは、まず「読めた」ことを見せる（黙って画面が変わると失敗に見える）
-    if (cameFromQr) show("setup-registered");
+    if (cameFromQr) { show("setup-registered"); show("setup-keep-url"); }
     var ua = navigator.userAgent;
     var isIOS = /iPad|iPhone|iPod/.test(ua) ||
                 (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
@@ -206,7 +231,10 @@
   window.addEventListener("beforeinstallprompt", function (ev) {
     ev.preventDefault();
     deferred = ev;
-    if (setupMode) { hide("setup-other"); hide("setup-ios"); show("setup-android"); }
+    // 🔴 QRから来たときは押させない。この口で追加すると manifest の start_url
+    //    （鍵の無い /adminlink/）が焼き付き、また「まだ登録されていません」になる。
+    //    鍵を焼き付けるには、いま開いているURLをブラウザのメニューから追加してもらう必要がある。
+    if (setupMode && !cameFromQr) { hide("setup-other"); hide("setup-ios"); show("setup-android"); }
   });
   var ib = el("install-btn");
   if (ib) {
