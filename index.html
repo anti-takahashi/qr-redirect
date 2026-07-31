@@ -139,12 +139,21 @@
   .d-side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
   .d-qr { display: flex; align-items: center; gap: 8px; }
   .d-id { font-size: 11px; color: var(--sub); letter-spacing: .1em; font-family: ui-monospace, Consolas, monospace; }
-  .detail-panel .d-side h2 { font-size: 13px; margin: 0; line-height: 1.5; font-weight: 400; overflow-wrap: anywhere; }
-  .detail-panel .d-side .price-line {
-    font-size: 32px; line-height: 1.05; margin: 0; letter-spacing: -.015em; white-space: nowrap;
+  /* 🔴【2026-07-31】13px → 15px。カタログは客がスマホで見る画面で、本文15px以上が決まり
+     （CLAUDE.md）。小さい題名の隣に巨大な価格が並ぶことが、不揃いに見える原因の半分だった。 */
+  .detail-panel .d-side h2 { font-size: 15px; margin: 0; line-height: 1.55; font-weight: 400; overflow-wrap: anywhere; }
+  /* 🔴【2026-07-31 オーナー「価格バランス悪いです」】価格を右カラムから出して幅いっぱいへ。
+     もとは写真の右（実質150px前後）に 32px・nowrap で置いていたので、
+     ¥33,000 で既に右端に触れていた。実測では ¥120,000 の品があり、**確実にはみ出す**。
+     値札として主役にする意図はそのまま、置き場所だけ変える。
+     ・clamp で桁が増えても収まる  ・tabular-nums で数字の幅を揃える */
+  .detail-panel .price-line {
+    font-size: clamp(26px, 8.5vw, 36px); line-height: 1.1; margin: 0 0 12px;
+    letter-spacing: -.015em; white-space: nowrap;
+    font-variant-numeric: tabular-nums;
     color: var(--accent-dark); font-weight: 600;
   }
-  .detail-panel .d-side .price-line.sold { color: var(--sold); }
+  .detail-panel .price-line.sold { color: var(--sold); font-size: clamp(20px, 6vw, 26px); }
   .d-sep { border: 0; border-top: 1px solid var(--line); margin: 0 0 11px; }
   /* 採寸＝置けるかを決める情報。おまけの中でもこれだけは大きく */
   .d-dim { font-size: 15px; color: var(--ink); font-weight: 600; margin: 0 0 3px; line-height: 1.5; }
@@ -482,9 +491,10 @@
           '<div class="d-side">' +
             '<div class="d-qr"><span class="d-id">' + escapeHtml(item.masterId || '') + '</span></div>' +
             '<h2>' + escapeHtml(item.name) + '</h2>' +
-            priceHtml +
           '</div>' +
         '</div>' +
+        // 🔴 価格は写真の右ではなく**幅いっぱいの1行**（上のCSSの理由を参照）
+        priceHtml +
         '<hr class="d-sep">' +
         (item.dimensions ? '<p class="d-dim">' + escapeHtml(item.dimensions) + '</p>' : '') +
         // 種類は文章行ではなく印にする（案C）。空なら何も出さない＝「その他」だけの行を作らない

@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>商品管理｜アンティーク家具たかはし</title>
+
+<!-- 🔴【2026-07-31】管理ページの入口を自社ドメインへ置いた理由
+     管理ページ本体はGASが作っている。GASは中身をiframeで包むので、
+     いちばん外側の <head> はGoogleのものになり、**アイコンと名前の指定が届かない**
+     （ホーム画面に追加すると「ア」になる。実際に取得して確認済み）。
+     ここへ置くと、その1点だけが解決する。 -->
+<link rel="apple-touch-icon" href="/icon-admin-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-admin-192.png">
+<meta name="apple-mobile-web-app-title" content="商品管理">
+<meta name="application-name" content="商品管理">
+<link rel="manifest" href="/adminlink/manifest.json">
+<meta name="theme-color" content="#1e1a15">
+<!-- 店の人だけが使う入口。ログインは要るが、検索には出さない -->
+<meta name="robots" content="noindex, nofollow">
+
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100dvh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; padding: 24px 20px 40px;
+    background: #faf7f2; color: #2f2b26;
+    font-family: "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+    text-align: center; line-height: 1.8;
+  }
+  @media (prefers-color-scheme: dark) { body { background: #1b1813; color: #efe9dd; } }
+  .mark { width: 96px; height: 96px; border-radius: 22px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: .02em; }
+  p { margin: 0; font-size: 15px; max-width: 34em; }
+  .sub { font-size: 13px; opacity: .75; }
+  /* 🔴 タップ先は48px以上（店頭で立って押す） */
+  .go, .ghost {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 52px; padding: 0 26px; border-radius: 14px;
+    font-size: 17px; font-weight: 700; text-decoration: none; border: 0; cursor: pointer;
+    font-family: inherit;
+  }
+  .go { background: #7c6a4f; color: #fff; }
+  .ghost { background: transparent; color: inherit; border: 1px solid rgba(124,106,79,.45); }
+  .steps {
+    text-align: left; max-width: 30em; margin: 0 auto; padding: 16px 20px 16px 38px;
+    background: rgba(124,106,79,.10); border-radius: 14px; font-size: 15px;
+  }
+  .steps li { margin-bottom: 8px; }
+  .steps li:last-child { margin-bottom: 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <img class="mark" src="/icon-admin-512.png" alt="">
+
+  <!-- ふだんの入口（すぐ飛ぶ） -->
+  <div id="view-go">
+    <h1>商品管理をひらいています…</h1>
+    <p class="sub" style="margin:10px 0 16px;">切り替わらないときは、下のボタンを押してください。</p>
+    <a class="go" id="go" href="#">ひらく</a>
+  </div>
+
+  <!-- 鍵が無いとき -->
+  <div id="view-nokey" hidden>
+    <h1>この端末はまだ登録されていません</h1>
+    <p style="margin:10px 0 0;">
+      オーナーから渡された<b>アクセスキーQR</b>を、この端末のカメラで読み取ってください。<br>
+      一度読めば、次からはこのアイコンだけで入れます。
+    </p>
+  </div>
+
+  <!-- ホーム画面に追加する案内 -->
+  <div id="view-setup" hidden>
+    <h1>ホーム画面に追加する</h1>
+    <p style="margin:8px 0 4px;">追加すると、次からこのアイコンを押すだけで商品管理が開きます。</p>
+
+    <div id="setup-android" hidden style="margin-top:14px;">
+      <button class="go" id="install-btn" type="button">ホーム画面に追加</button>
+      <p class="sub" style="margin-top:10px;">追加するか聞かれるので「インストール」を押してください。</p>
+    </div>
+
+    <ol class="steps" id="setup-ios" hidden style="margin-top:14px;">
+      <li>画面の下（または上）にある <b>共有ボタン</b>（□に↑の絵）を押す</li>
+      <li>メニューを下へたどって <b>「ホーム画面に追加」</b> を押す</li>
+      <li>名前が <b>商品管理</b> になっていることを確かめて <b>「追加」</b></li>
+    </ol>
+
+    <ol class="steps" id="setup-other" hidden style="margin-top:14px;">
+      <li>ブラウザのメニュー（︙ など）を開く</li>
+      <li><b>「ホーム画面に追加」</b> を選ぶ</li>
+    </ol>
+
+    <p class="sub" id="setup-done-note" hidden style="margin-top:12px;">
+      ✓ この端末では追加済みとして記録しました。<br>
+      やり直したいときは、もう一度この画面を開いてください。
+    </p>
+    <p style="margin-top:16px;">
+      <a class="ghost" id="skip" href="#">追加せずに商品管理をひらく</a>
+    </p>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  // 管理ページ本体（GAS）。ここに鍵を付けて渡す。
+  var ADMIN = "https://script.google.com/macros/s/AKfycbw2BGhgYrZujEVnpxEgkJsurAWLKD-KUZuMEuxb3ig302pBt7K1wE15a5Af3yaqCaoN/exec";
+
+  // 🔴 鍵は端末に覚えておき、**ホーム画面のアイコンが指すURLには載せない**。
+  //    URLに載せると、画面写し・共有・履歴からそのまま漏れる。
+  var KEY_STORE = "takahashi-adminkey";
+  var ADDED_STORE = "takahashi-adminlink-added";
+
+  function q(name) {
+    var m = new RegExp("[?&]" + name + "=([^&]*)").exec(location.search);
+    return m ? decodeURIComponent(m[1].replace(/\+/g, " ")) : "";
+  }
+  function el(id) { return document.getElementById(id); }
+  function show(id) { var n = el(id); if (n) n.hidden = false; }
+  function hide(id) { var n = el(id); if (n) n.hidden = true; }
+
+  var setupMode = q("setup") === "1";
+
+  // ---- 鍵を決める（URLで渡されたら覚える。無ければ覚えているものを使う）----
+  var key = q("t");
+  if (key) {
+    try { localStorage.setItem(KEY_STORE, key); } catch (e) { /* 覚えられなくても今回は動く */ }
+  } else {
+    try { key = localStorage.getItem(KEY_STORE) || ""; } catch (e) { key = ""; }
+  }
+
+  // 🔴【2026-07-31・検証で発覚】アドレス欄には**何も残さない**。
+  //    もとは案内モードのとき `?setup=1` を残していたが、
+  //    manifest の display が "browser" のときホーム画面への追加は
+  //    **web appではなくブックマーク**になり、manifest の start_url ではなく
+  //    **その時に開いていたURL**が焼き付く（iOS/Androidとも）。
+  //    `?setup=1` が付いたまま追加されると、アイコンを押すたびに案内画面が出て
+  //    商品管理へ入るのに毎回もう1タップ要る＝この中継を作った意味が消える。
+  //    案内を出すかどうかは、この時点で読み取った setupMode（JSの変数）だけで決める。
+  try { history.replaceState(null, "", location.pathname); } catch (e) {}
+
+  var target = ADMIN + (key ? (ADMIN.indexOf("?") >= 0 ? "&" : "?") + "k=" + encodeURIComponent(key) : "");
+  el("go").href = target;
+  el("skip").href = target;
+
+  // ---- どの画面を出すか ----
+  var standalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+                   window.navigator.standalone === true;
+
+  if (setupMode && !standalone) {
+    hide("view-go");
+    show("view-setup");
+    var ua = navigator.userAgent;
+    var isIOS = /iPad|iPhone|iPod/.test(ua) ||
+                (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    // 🔴 iOSには**ホーム画面へ追加させるAPIが無い**（beforeinstallprompt を持たない）。
+    //    押すと追加されるボタンは作れないので、手順を出すところまで。
+    if (isIOS) show("setup-ios");
+    else show("setup-other");   // Androidは下の beforeinstallprompt が来たら差し替える
+    try { if (localStorage.getItem(ADDED_STORE)) show("setup-done-note"); } catch (e) {}
+  } else if (!key) {
+    hide("view-go");
+    show("view-nokey");
+  } else {
+    // ふだんの入口。すぐ飛ぶ（戻るでここへ落ちないよう replace）
+    setTimeout(function () {
+      try { location.replace(target); } catch (e) { location.href = target; }
+    }, 60);
+  }
+
+  // ---- Androidだけ、押すと追加できる ----
+  var deferred = null;
+  window.addEventListener("beforeinstallprompt", function (ev) {
+    ev.preventDefault();
+    deferred = ev;
+    if (setupMode) { hide("setup-other"); hide("setup-ios"); show("setup-android"); }
+  });
+  var ib = el("install-btn");
+  if (ib) {
+    ib.addEventListener("click", function () {
+      if (!deferred) return;
+      deferred.prompt();
+      deferred.userChoice.then(function (res) {
+        if (res && res.outcome === "accepted") {
+          try { localStorage.setItem(ADDED_STORE, "1"); } catch (e) {}
+          show("setup-done-note");
+        }
+        deferred = null;
+      });
+    });
+  }
+  window.addEventListener("appinstalled", function () {
+    try { localStorage.setItem(ADDED_STORE, "1"); } catch (e) {}
+    show("setup-done-note");
+  });
+})();
+</script>
+</body>
+</html>
