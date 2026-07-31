@@ -14,7 +14,19 @@
 <link rel="icon" type="image/png" sizes="192x192" href="/icon-admin-192.png">
 <meta name="apple-mobile-web-app-title" content="商品管理">
 <meta name="application-name" content="商品管理">
-<link rel="manifest" href="/adminlink/manifest.json">
+<!-- 🔴【2026-07-31】manifest を**外した**。付けてはいけない。
+     実機（iPhone OS 18.7 / Safari 26.5）の状態表示で確定した:
+        ショートカット : アプリとして起動
+        開いているURL  : /adminlink/     ← manifest の start_url そのもの
+        URLに鍵(?t=)   : 無し
+        端末の記憶      : 無し
+     manifest があると iOS はホーム画面のアイコンを**web appとして起動**する。すると
+       ① 開くURLが、追加したときのURLではなく **start_url に置き換わる**（鍵が消える）
+       ② localStorage が **Safariと別の領域**になる（覚えた鍵が見えない）
+     ＝ 鍵をURLに焼く道も、端末に覚える道も、両方この1行が塞いでいた。
+     manifest を外せば普通のブックマークになり、**追加したときのURL（鍵つき）がそのまま開く**。
+     アイコンは下の apple-touch-icon、名前は apple-mobile-web-app-title で出る（実機確認済み）。
+     ⚠️ 「Androidでアプリっぽく入れたい」で戻さないこと。戻すとiPhoneで**使えなくなる**。 -->
 <meta name="theme-color" content="#1e1a15">
 <!-- 店の人だけが使う入口。ログインは要るが、検索には出さない -->
 <meta name="robots" content="noindex, nofollow">
