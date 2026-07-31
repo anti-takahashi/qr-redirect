@@ -68,8 +68,22 @@
     <h1>この端末はまだ登録されていません</h1>
     <p style="margin:10px 0 0;">
       オーナーから渡された<b>アクセスキーQR</b>を、この端末のカメラで読み取ってください。<br>
-      一度読めば、次からはこのアイコンだけで入れます。
+      読み取ったあとの画面から、<b>そのままホーム画面に追加</b>してください。
     </p>
+    <p style="margin:14px 0 0;font-weight:700;">
+      ⚠️ 前に作ったショートカットは作り直しが必要です<br>
+      <span class="sub" style="font-weight:400;">
+        ブックマークのURLは後から変わりません。古いものは消してください。
+      </span>
+    </p>
+    <!-- 🔴【2026-07-31】見立てを2回外した。推測を重ねずに**画面自身に状態を出させる**。
+         ここが分かれば、鍵がどこで落ちているかを実機1枚で切り分けられる。 -->
+    <details style="margin-top:18px;text-align:left;max-width:32em;width:100%;">
+      <summary class="sub" style="cursor:pointer;">うまくいかないときの情報</summary>
+      <pre id="diag" style="margin:10px 0 0;padding:12px;border-radius:10px;
+           background:rgba(124,106,79,.12);font-size:12px;line-height:1.7;
+           white-space:pre-wrap;word-break:break-all;"></pre>
+    </details>
   </div>
 
   <!-- ホーム画面に追加する案内 -->
@@ -219,6 +233,19 @@
   } else if (!key) {
     hide("view-go");
     show("view-nokey");
+    // 🔴 状態をそのまま出す（推測を重ねないため）。鍵の中身は出さず、有無と長さだけ。
+    var ls = "読めない";
+    try { ls = localStorage.getItem(KEY_STORE) ? "有り" : "無し"; } catch (e) { ls = "使えない(" + e.name + ")"; }
+    var lines = [
+      "開いているURL : " + location.href,
+      "URLに鍵(?t=)  : " + (cameFromQr ? "有り" : "無し"),
+      "端末の記憶     : " + ls,
+      "追加済みの印   : " + (alreadyAdded ? "有り" : "無し"),
+      "ショートカット : " + (standalone ? "アプリとして起動" : "ブラウザで起動"),
+      "端末           : " + navigator.userAgent
+    ];
+    var d = el("diag");
+    if (d) d.textContent = lines.join("\n");
   } else {
     // ふだんの入口。すぐ飛ぶ（戻るでここへ落ちないよう replace）
     setTimeout(function () {
