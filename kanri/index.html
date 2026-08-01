@@ -1727,7 +1727,11 @@
 
   function lstThumbs(ids, from) {
     if (from >= ids.length) return;
-    var part = ids.slice(from, from + 12);
+    // 🔴【2026-08-01・オーナー実機「重い」】12件ずつにしていたので、
+    //   50件の一覧で**同じシートを5回読み、5往復**していた。
+    //   cacheOnly はDriveへ行かない（シートを1回読むだけ）ので、まとめて頼む。
+    //   ⚠️ サーバ側の上限（PRICING_THUMB_CACHE_ONLY_MAX_）を超えて頼まない。
+    var part = ids.slice(from, from + 200);
     // cacheOnly＝画像キャッシュだけを見る。付けないとサーバが1件ずつDriveを走査する
     //（50件並ぶ画面なので、開いただけで最大50回の走査になる）。
     call("getPricingThumbnails", { masterIds: part, cacheOnly: true }).then(function (map) {
@@ -1745,13 +1749,13 @@
         }
       }
       lstMarkNoThumb(part);
-      lstThumbs(ids, from + 12);
+      lstThumbs(ids, from + 200);
     }).catch(function (e) {
       // 認証で止まったときに「写真を読めませんでした」と出さない（原因が別物）
       // 同上。認証で止まったときに「写真を読めませんでした」と出さない（原因が別物）
       if (isAuthError(e)) return;
       lstMarkNoThumb(part);
-      lstThumbs(ids, from + 12);
+      lstThumbs(ids, from + 200);
     });
   }
 

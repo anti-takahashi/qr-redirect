@@ -35,18 +35,33 @@
     padding-bottom: env(safe-area-inset-bottom);
   }
 
+  /* 🔴【2026-08-01・オーナー指示「デザインだけ統一しましょう」】
+     公開カタログ（`catalog-site/index.html`）と同じ顔にする。
+     客から見れば同じ店の同じカタログなので、入口によって見た目が変わるのはおかしい。
+     ・店名は**明朝**・中央・白い帯（骨董らしさは見出し1行で足りる）
+     ・本文はゴシックのまま（2026-07-30 オーナー決定「読みやすさ重視」）
+     ⚠️ 値は向こうから**そのまま写す**（手で似せると少しずつずれる）。
+        向こうを変えるときは、こちらも一緒に変える。 */
   header {
-    position: sticky; top: 0; z-index: 10; background: var(--bg);
+    position: sticky; top: 0; z-index: 10;
+    background: var(--card);
     border-bottom: 1px solid var(--line);
-    display: flex; align-items: center; gap: 10px;
-    padding: calc(10px + env(safe-area-inset-top)) 14px 10px 14px;
+    padding: calc(24px + env(safe-area-inset-top)) 20px 16px 20px;
+    text-align: center;
   }
+  header h1 {
+    font-size: 20px; letter-spacing: 0.12em; margin: 0 0 6px; font-weight: 600;
+    font-family: "Hiragino Mincho ProN", "Yu Mincho", YuMincho, "Shippori Mincho", serif;
+  }
+  header .shop-sub { font-size: 12px; color: var(--muted); margin: 0; letter-spacing: 0.05em; }
+  /* 「←」は帯の左へ重ねる（中央の店名をずらさない） */
   #back {
     display: none; align-items: center; justify-content: center;
-    min-width: 44px; min-height: 44px; margin-left: -8px;
+    position: absolute; left: 6px; top: calc(18px + env(safe-area-inset-top));
+    min-width: 44px; min-height: 44px;
     border: 0; background: transparent; color: var(--fg); font-size: 22px; cursor: pointer;
   }
-  #here { font-size: 17px; font-weight: 700; flex: 1; }
+  #here { font-size: 12px; color: var(--muted); letter-spacing: 0.05em; }
 
   main { padding: 14px; max-width: 760px; margin: 0 auto; }
   .view { display: none; }
@@ -116,18 +131,19 @@
 <body>
 <div id="busy"></div>
 
-<header>
+<header style="position:sticky;">
   <button id="back" type="button" aria-label="ひとつ戻る">←</button>
-  <div id="here">会員カタログ</div>
+  <h1>アンティーク家具たかはし</h1>
+  <div id="here" class="shop-sub">LINE会員限定カタログ</div>
 </header>
 
 <main>
   <!-- ① まだログインしていない -->
   <section class="view" id="v-gate">
     <div class="card" style="text-align:center;">
-      <h1>アンティーク家具たかはし</h1>
-      <p class="sub" style="margin-bottom:16px;">LINE会員限定カタログ</p>
-      <p>公式LINEでログインすると、店頭の品をご覧いただけます。<br>
+      <!-- 🔴 店名は帯（header）に出るようになったので、ここでは繰り返さない。
+           同じ画面に2回出ると、どちらが見出しか分からなくなる。 -->
+      <p style="margin-bottom:16px;">公式LINEでログインすると、店頭の品をご覧いただけます。<br>
         気になるものは<b>お気に入り</b>に入れておけます。</p>
       <a class="btn line" id="login" href="#">公式LINEでログイン</a>
       <p class="sub" style="margin:12px 0 0;">
