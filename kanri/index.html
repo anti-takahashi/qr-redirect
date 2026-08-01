@@ -318,24 +318,20 @@
     <!-- 🔴【2026-08-01・オーナー指示】QR検索をここへ組み込んだ。
          現物が手元にあるなら上（QRを読む／IDを入れる）、
          手元に無いなら下（言葉で探す）。**同じ画面で両方できる**。 -->
+    <!-- 🔴【2026-08-01・オーナー指示】検索窓は1つ。
+         「商品IDで開く」と「言葉で探す」で窓を分けていたが、
+         使う人にとっては**どちらも“さがす”**で、入れる場所を選ばせるだけ無駄だった。
+         入れたものを見て機械が振り分ける（IDらしければその品を開く／それ以外は言葉で探す）。 -->
     <div class="card">
       <label class="f">
-        <span>QRを読むか、商品ID（T-00123）を入れる</span>
+        <span>QRを読む・商品ID・言葉で探す（空のままなら全部）</span>
         <input type="text" id="sch-input" inputmode="text" autocomplete="off"
-               autocapitalize="off" spellcheck="false" placeholder="T-00123">
+               autocapitalize="off" spellcheck="false" placeholder="T-00123／鉄瓶 など">
       </label>
       <button class="btn" id="sch-scan" type="button" style="min-height:56px;">
         <span class="t" style="text-align:center;">QRを読む</span></button>
-      <button class="btn primary" id="sch-go" type="button"><span class="t">開く</span></button>
+      <button class="btn primary" id="sch-go" type="button"><span class="t">探す</span></button>
       <div class="msg" id="sch-msg"></div>
-    </div>
-
-    <div class="card">
-      <label class="f">
-        <span>探す言葉（空のままなら全部）</span>
-        <input type="text" id="lst-q" autocomplete="off" placeholder="鉄瓶 など">
-      </label>
-      <button class="btn primary" id="lst-go" type="button"><span class="t">探す</span></button>
       <div class="msg" id="lst-msg"></div>
     </div>
     <div id="lst-list"></div>
@@ -1136,8 +1132,10 @@
         var r = rows[i];
         h += '<div style="display:flex; align-items:center; gap:8px; padding:7px 0;' +
              ' border-bottom:1px solid var(--line);">' +
-             '<div style="flex:1; min-width:0; font-size:14px; overflow:hidden;' +
-             ' text-overflow:ellipsis; white-space:nowrap;">' +
+             '<div class="tap-open" role="button" tabindex="0" ' +
+             'style="flex:1; min-width:0; font-size:14px; overflow:hidden; cursor:pointer;' +
+             ' text-overflow:ellipsis; white-space:nowrap; color:var(--accent);' +
+             ' text-decoration:underline; text-underline-offset:3px;">' +
              esc(r.name || r.masterId) + "</div>" +
              '<div class="sub" style="font-size:12px; white-space:nowrap;">' + yen(r.saleValue) + "</div>" +
              '<button type="button" class="sale-undo" data-id="' + esc(r.masterId) + '" ' +
@@ -1147,6 +1145,12 @@
              "</div>";
       }
       box.innerHTML = h;
+      // 今日売れたものも名前から開ける（「これ何だったか」をその場で確かめられる）
+      var trs = box.children;
+      for (var t = 0; t < trs.length; t++) {
+        var ub = trs[t].querySelector(".sale-undo");
+        wireOpen(trs[t], ub ? ub.getAttribute("data-id") : "");
+      }
       var us = box.querySelectorAll(".sale-undo");
       for (var j = 0; j < us.length; j++) {
         (function (b) {
@@ -1326,9 +1330,47 @@
       msg.textContent = e.message;
     });
   }
-  $("sch-go").addEventListener("click", schGo);
+  // 🔴【2026-08-01・オーナー指示】窓は1つ。入れたものを見て振り分ける。
+  //   ・QRのURL／商品ID（T-00123・00123・123）→ **その品を開く**
+  //   ・それ以外の言葉 → **言葉で探す**（空なら全部）
+  //   使う人に「どっちの窓に入れるか」を選ばせない。間違えようがない形にする。
+  function looksLikeItem(raw) {
+    var v = String(raw || "").trim();
+    if (!v) return false;
+    if (/^https?:\/\//i.test(v)) return true;           // QRのURLを貼った
+    if (/^[Tt]-?\d{1,6}$/.test(v)) return true;          // T-00123 / T00123
+    if (/^\d{1,6}$/.test(v)) return true;                // 123（サーバがT-00123へ解く）
+    return false;
+  }
+  function findGo() {
+    var raw = String($("sch-input").value || "").trim();
+    $("sch-msg").textContent = "";
+    $("lst-msg").textContent = "";
+    if (looksLikeItem(raw)) { schGo(); return; }
+    LST.keyword = raw;
+    loadList(false);
+  }
+  $("sch-go").addEventListener("click", findGo);
   $("sch-input").addEventListener("keydown", function (e) {
-    if (e.key === "Enter") { e.preventDefault(); schGo(); }
+    if (e.key === "Enter") { e.preventDefault(); findGo(); }
+  });
+
+  // QRを読む（4画面ぶん）。読めた文字はその画面の入力欄へ入れ、そのまま先へ進める。
+  // 🔴 読ませておいて「次に何を押すか」を考えさせない（店頭で片手で使う）。
+  [["sale-scan", "sale-input", function () { $("sale-add").click(); }],
+   ["sch-scan", "sch-input", function () { schGo(); }],
+   ["edt-scan", "edt-input", function () { $("edt-go").click(); }],
+   ["net-scan", "net-input", function () { $("net-go").click(); }]
+  ].forEach(function (t) {
+    var b = $(t[0]);
+    if (!b) return;
+    b.addEventListener("click", function () {
+      startScan(function (text) {
+        var el = $(t[1]);
+        if (el) el.value = text;
+        t[2]();
+      });
+    });
   });
   // 詳細の画面は入口を持たなくなった（入口は商品一覧）。ここで focus するものは無い。
 
@@ -1363,11 +1405,12 @@
         //   後追いで写真だけ取る口が既にあったのに、画面が一度も呼んでいなかった。
         h += '<div class="card" data-id="' + esc(id) + '" data-rev="' + esc(rev) + '">' +
              '<div style="display:flex; gap:10px; align-items:flex-start;">' +
+             openable(
              '<img class="pri-th" alt="" style="width:64px;height:64px;border-radius:10px;' +
              'object-fit:cover;background:#efe9de;flex:none;">' +
              '<div style="flex:1; min-width:0;">' +
-             "<h2 style=\"font-size:15px;\">" + esc(nm) + "</h2>" +
-             '<div class="sub">' + esc(id) + "</div></div></div>" +
+             openTitle(nm) +
+             '<div class="sub">' + esc(id) + "</div></div>") +
              '<div style="height:8px;"></div>' +
              '<div style="display:flex; gap:8px; align-items:flex-end;">' +
              '<label class="f" style="flex:1; margin:0;"><span>値段（円）</span>' +
@@ -1446,6 +1489,7 @@
       var cards = box.querySelectorAll(".card");
       for (var j = 0; j < cards.length; j++) {
         (function (c) {
+          wireOpen(c, c.getAttribute("data-id"));   // 名前・写真をタップで詳細へ
           c.querySelector(".pri-save").addEventListener("click", function () {
             var input = c.querySelector(".pri-in");
             var out = c.querySelector(".pri-r");
@@ -1607,18 +1651,51 @@
     });
   }
 
+  // 🔴【2026-08-01・オーナー指示】「商品全般タップで開けるように」。
+  //   商品が並ぶところは**どこでも**名前と写真から開ける。
+  //   ⚠️ 開く先は1つ（QR検索と同じ詳細）。ここで別の開き方を作らない。
+  //   ⚠️ 「開く」ボタンは置かない（画面を圧迫する＝オーナー指摘）。
+  //      代わりに**押せると見える**ようにする（下線＋色）。押せるのに見えないのが一番使われない。
+  function openable(inner) {
+    return '<div class="tap-open" role="button" tabindex="0" ' +
+           'style="display:flex; gap:10px; align-items:flex-start; cursor:pointer;">' + inner + "</div>";
+  }
+  function openTitle(text) {
+    return "<h2 style=\"font-size:15px; color:var(--accent); text-decoration:underline; " +
+           "text-underline-offset:3px;\">" + esc(text) + "</h2>";
+  }
+  // カードの中の tap-open を、その品の詳細へつなぐ（1か所に集める）
+  function wireOpen(card, masterId) {
+    var t = card.querySelector(".tap-open");
+    if (!t || !masterId) return;
+    var open = function () {
+      go("search");   // stack に積まれるので「←」で元の一覧へ帰れる
+      $("sch-input").value = masterId;
+      $("sch-msg").textContent = "";
+      openDetail(masterId, bumpSeq("sch"));
+    };
+    t.addEventListener("click", open);
+    t.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+    });
+  }
+
   function lstRow(r) {
     return '<div class="card" data-id="' + esc(r.masterId) + '" data-rev="' + esc(r.rev) +
       '" data-haspic="' + (r.hasPhoto ? "1" : "0") + '">' +
-      '<div style="display:flex; gap:10px; align-items:flex-start;">' +
+      // 🔴【2026-08-01・オーナー指示】「開く」ボタンは画面を圧迫する。
+      //   **商品名と写真そのものをタップ先**にする（1件ぶんの高さが減る）。
+      //   ⚠️ 見た目でタップできると分かること／指で押せる大きさ（写真56px＋名前の行）
+      //      の2つを外さない。押せるのに押せると見えない、が一番使われない形。
+      openable(
       '<img class="lst-th" alt="" style="width:56px;height:56px;border-radius:10px;' +
       'object-fit:cover;background:#efe9de;flex:none;">' +
       '<div style="flex:1; min-width:0;">' +
-      "<h2 style=\"font-size:15px;\">" + esc(r.name || r.masterId) + "</h2>" +
+      openTitle(r.name || r.masterId) +
       '<div class="sub">' + esc(r.masterId) +
       (r.place ? "　" + esc(r.place) : "") +
       (r.legal ? '　<span style="color:var(--danger);">法規の確認あり</span>' : "") +
-      "</div></div></div>" +
+      "</div>") +
       '<div style="height:8px;"></div>' +
       '<div style="display:flex; gap:8px; align-items:flex-end; margin-bottom:8px;">' +
       '<label class="f" style="flex:1; margin:0;"><span>値段（円）</span>' +
@@ -1634,8 +1711,6 @@
       //   タップしても何も起きず、**補足を書き足せない**。
       //   docs では「QR検索と商品一覧は入口が違うだけで開く先は同じ部品」と決めてあるのに、
       //   一覧からその部品へ行く道を作っていなかった。
-      '<button type="button" class="btn lst-open" style="margin:8px 0 0;">' +
-      '<span class="t">開く（置き場所・補足を見る／書く）</span></button>' +
       '<div class="msg lst-r"></div></div>';
   }
 
@@ -1691,17 +1766,7 @@
     });
   
     // 一覧から詳細を開く。**開く先はQR検索と同じ**（画面を増やさない）
-    var openBtn = c.querySelector(".lst-open");
-    if (openBtn) {
-      openBtn.addEventListener("click", function () {
-        var id = c.getAttribute("data-id");
-        if (!id) return;
-        go("search");   // stack に積まれるので「←」で一覧へ帰れる
-        $("sch-input").value = id;
-        $("sch-msg").textContent = "";
-        openDetail(id, bumpSeq("sch"));
-      });
-    }
+    wireOpen(c, c.getAttribute("data-id"));
 }
 
   // 「もっと見る」は同じ検索の続きなので、世代を進めずに引き継ぐ。
@@ -1749,13 +1814,7 @@
       msg.textContent = "一覧が読めていません（0点ではありません）。" + e.message;
     });
   }
-  $("lst-go").addEventListener("click", function () {
-    LST.keyword = String($("lst-q").value || "").trim();
-    loadList(false);
-  });
-  $("lst-q").addEventListener("keydown", function (e) {
-    if (e.key === "Enter") { e.preventDefault(); $("lst-go").click(); }
-  });
+  // 言葉の窓は廃止（窓は1つ＝上の findGo が振り分ける）
   $("lst-more").addEventListener("click", function () { loadList(true); });
   ONSHOW["list"] = function () {
     // 現物が手元にあるときが多いので、開いたらQR/IDの欄にカーソルを置く
@@ -2070,11 +2129,11 @@
       for (var i = 0; i < rows.length; i++) {
         var r = rows[i];
         var th = r.photo || "";
-        h += '<div class="card"><div style="display:flex; gap:10px; align-items:flex-start;">' +
+        h += '<div class="card" data-id="' + esc(r.masterId) + '">' + openable(
              (th ? '<img src="' + esc(th) + '" alt="" style="width:64px;height:64px;border-radius:10px;' +
                    'object-fit:cover;background:#efe9de;flex:none;">' : "") +
              '<div style="flex:1; min-width:0;">' +
-             "<h2 style=\"font-size:15px;\">" + esc(r.name || r.masterId) + "</h2>" +
+             openTitle(r.name || r.masterId) +
              '<div class="sub">' + esc(r.masterId) + "　" + esc(r.status || "候補") + "</div>" +
              '<div class="sub">' +
              (r.confirmedPrice ? "確定 " + esc(yen(r.confirmedPrice))
@@ -2082,9 +2141,11 @@
              "</div>" +
              (r.listedAnywhere ? '<div class="msg ok" style="font-size:13px;">もう出品済みです</div>' : "") +
              (r.masterNotFound ? '<div class="msg err" style="font-size:13px;">商品マスタに見つかりません</div>' : "") +
-             "</div></div></div>";
+             "</div>") + "</div>";
       }
       box.innerHTML = h;
+      var qc = box.querySelectorAll(".card");
+      for (var k = 0; k < qc.length; k++) wireOpen(qc[k], qc[k].getAttribute("data-id"));
     }).catch(function (e) {
       // 🔴 読めなかったことを「0件」と混ぜない
       // 🔴【2026-08-01・オーナー実機「PC版にはリストあるがこっちは出ない」】
