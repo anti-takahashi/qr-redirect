@@ -79,6 +79,32 @@
   .btn:active { background: #f2ece2; }
   .btn .t { flex: 1; }
   .btn .d { display: block; font-weight: 400; font-size: 12.5px; color: var(--muted); }
+
+  /* 🔴【2026-08-01・オーナー指摘】「行先のデザインはそのままで、トップだけシンプルに
+     されたので違和感がある」。実際、行先の画面（値段をつける・商品一覧）は見出し19px・
+     品名16pxで組んであるのに、**ホームのタイルだけ 15px/12.5px** で小さかった。
+     ＝トップだけ別の設計で作っていた。行先に合わせて大きくする。
+     ⚠️ 大きくするのは**ホームのタイルだけ**。他の画面はもう行先と揃っているので触らない
+        （揃っているものを動かすと、今度はそちらがずれる）。 */
+  /* 🔴【2026-08-01・オーナー指示】オーナー専用の機能は**タブで切り替える**。
+     以前は「オーナーのみ」という見出しの下にそのまま並べていたので、
+     ホームが8個のタイルになり、代表(父)が使う5つが埋もれていた。
+     ⚠️ タブは**オーナーにしか出さない**（store には基本の5つだけ＝今までどおり1枚）。
+        隠すのは見やすさのためで、守っているのはサーバ側（requireAdmin_）。 */
+  #home-tabs { display: none; gap: 8px; margin-bottom: 14px; }
+  #home-tabs.on { display: flex; }
+  #home-tabs button {
+    flex: 1; min-height: 52px; padding: 10px 12px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    font: inherit; font-size: 16px; font-weight: 700; color: var(--muted); cursor: pointer;
+  }
+  #home-tabs button[aria-selected="true"] {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+  }
+
+  #v-home .btn { min-height: 76px; padding: 16px 18px; margin-bottom: 12px; }
+  #v-home .btn .t { font-size: 18px; line-height: 1.5; }
+  #v-home .btn .d { font-size: 14px; line-height: 1.6; margin-top: 3px; }
   /* 🔴【2026-08-01・実機で発覚】もとは .btn.primary .t を flex:0 にしていた。
      .btn は横並び(flex)なので、子の幅が文字1つぶんまで潰れ、
      「はいる」が **は／い／る の3行**になって縦に伸びていた（実機スクショで確認）。
@@ -151,7 +177,7 @@
         <input type="tel" id="pin" inputmode="numeric" autocomplete="one-time-code"
                pattern="[0-9]*" maxlength="12" placeholder="••••">
       </label>
-      <button class="btn primary" id="pin-go" type="button"><span class="t">はいる</span></button>
+      <button class="btn primary" id="pin-go" type="button"><span class="t">入る</span></button>
       <div class="msg" id="pin-msg"></div>
     </div>
   </section>
@@ -160,6 +186,12 @@
   <section class="view" id="v-home">
     <!-- 入り直したときの説明をここへ出す（黙ってホームへ飛ばさない・Fable5監査L-18） -->
     <div class="msg" id="home-msg"></div>
+    <!-- オーナーだけに出るタブ（store には出さない＝基本の5つだけ） -->
+    <div id="home-tabs" role="tablist">
+      <button type="button" id="home-tab-basic" role="tab" aria-selected="true">基本</button>
+      <button type="button" id="home-tab-owner" role="tab" aria-selected="false">オーナー</button>
+    </div>
+    <div id="home-basic">
     <button class="btn" data-go="quickreg">
       <span class="t">QRを貼って登録する<span class="d">棚の前で、ラベルを貼って写真を撮る</span></span>
     </button>
@@ -173,13 +205,13 @@
       <span class="t">未値付けに値段をつける<span class="d">まだ値段の無いものを続けて</span></span>
     </button>
     <button class="btn" data-go="list">
-      <span class="t">商品一覧<span class="d">眺めて、ねだんやネット候補を入れる</span></span>
+      <span class="t">商品一覧<span class="d">眺めて、値段やネット候補を入れる</span></span>
     </button>
     <!-- 🔴 管理モードはオーナーだけ。ここを隠すのは**見やすさのため**であって、
          守っているのはサーバ側（requireAdmin_ が代表・手伝いを拒否する）。
          画面から消すことを対策と呼ばない（CLAUDE.md「絞り込みはサーバ側で行う」）。 -->
+    </div>
     <div id="home-admin" style="display:none;">
-      <div class="sub" style="margin:18px 0 8px;">オーナーのみ</div>
       <button class="btn" data-go="edit">
         <span class="t">QRで探して直す（詳しく）<span class="d">商品名・カテゴリ・説明まで直す</span></span>
       </button>
@@ -194,9 +226,6 @@
       </button>
     </div>
 
-    <div class="card sub" style="margin-top:14px;">
-      いまはまだ作っている途中です。<b>これまでの管理ページもそのまま使えます。</b>
-    </div>
   </section>
 
   <!-- ④ 各画面（中身はこれから足す） -->
@@ -249,7 +278,7 @@
       <div id="sale-today" class="sub">読み込んでいます…</div>
     </div>
   </section>
-  <!-- QRで探す・直す: QR/IDから1点を開いて、ねだんと補足を書き足す
+  <!-- QRで探す・直す: QR/IDから1点を開いて、値段と補足を書き足す
        🔴 searchProducts は使わない（店舗の人は使えない口。原価が乗る全列を返すため）。
           QR・IDの解決 → その1点だけ、が店舗モードの道。 -->
   <section class="view" id="v-search">
@@ -278,10 +307,10 @@
   <section class="view" id="v-list">
     <div class="card">
       <label class="f">
-        <span>さがす言葉（空のままなら全部）</span>
+        <span>探す言葉（空のままなら全部）</span>
         <input type="text" id="lst-q" autocomplete="off" placeholder="鉄瓶 など">
       </label>
-      <button class="btn primary" id="lst-go" type="button"><span class="t">さがす</span></button>
+      <button class="btn primary" id="lst-go" type="button"><span class="t">探す</span></button>
       <div class="msg" id="lst-msg"></div>
     </div>
     <div id="lst-list"></div>
@@ -352,6 +381,8 @@
   var WHO = "";
 
   var K_KEY = "takahashi-kanri-key";
+  // /adminlink/ が覚えている鍵（同じドメイン・名前だけ違う）
+  var K_ADMINLINK_KEY = "takahashi-adminkey";
   var K_API = "takahashi-kanri-api";
   var K_SES = "takahashi-kanri-session";
 
@@ -610,7 +641,13 @@
     return (v && API_ALLOW.indexOf(v) !== -1) ? v : "";
   }
 
-  KEY = qs("k") || get(K_KEY);
+  // 🔴【2026-08-01・オーナー指示】既に配ってあるキーQRの鍵を引き継ぐ。
+  //   `/adminlink/`（キーQRの着地点）は同じドメインで、鍵を `takahashi-adminkey` に
+  //   覚えている。名前が違うだけで**同じ端末に既にある**のに、この画面は見ていなかった＝
+  //   いつものQRを読んだ端末でも、ここへ来ると「鍵がありません」になっていた。
+  //   ⚠️ 優先順は URL → この画面の記憶 → 中継の記憶。中継のものを勝たせない
+  //      （この画面で入り直した人の鍵を、古い中継の値で上書きしない）。
+  KEY = qs("k") || get(K_KEY) || get(K_ADMINLINK_KEY);
   // 🔴【2026-08-01・Fable5監査(2周目)M-b】弾いたことを**黙らない**。
   //   ?api= を付けて開いた人は「新しい方を見ている」つもりでいるのに、
   //   実際には既定のまま動くので、直したはずの不具合が直っていないように見える。
@@ -621,6 +658,19 @@
   set(K_API, API);   // 保存するのは検証を通った値だけ
   SESSION = get(K_SES);
 
+  var IS_MASTER = false;
+
+  // ホームのタブ。**表示の切り替えだけ**で、ボタンの登録には一切触らない。
+  function showHomeTab(which) {
+    var owner = IS_MASTER && which === "owner";
+    $("home-basic").style.display = owner ? "none" : "";
+    $("home-admin").style.display = owner ? "" : "none";
+    $("home-tab-basic").setAttribute("aria-selected", owner ? "false" : "true");
+    $("home-tab-owner").setAttribute("aria-selected", owner ? "true" : "false");
+  }
+  $("home-tab-basic").addEventListener("click", function () { showHomeTab("basic"); });
+  $("home-tab-owner").addEventListener("click", function () { showHomeTab("owner"); });
+
   function enter(session, who, role) {
     SESSION = session || "";
     WHO = who || "";
@@ -630,7 +680,13 @@
     //    覚えている値や画面の状態から推測しない。
     //    ⚠️ ここで出さなくても守りにはならない（守るのはサーバ側の requireAdmin_）。
     //       出す理由は「代表・手伝いに、押しても拒否される道を見せない」ため。
-    $("home-admin").style.display = (role === "master") ? "" : "none";
+    // 🔴【2026-08-01・オーナー指示】オーナーはタブで切り替える。store はタブを出さず基本だけ。
+    //   ⚠️ ボタン自体は**動かしていない**（束を囲う div を足しただけ）。
+    //      data-go の登録は読み込み時に [data-go] を一括で拾う作りなので、
+    //      入れ子が1つ増えても配線は切れない（作り直すと切れるので作り直さない）。
+    IS_MASTER = (role === "master");
+    $("home-tabs").className = IS_MASTER ? "on" : "";
+    showHomeTab("basic");   // 入り直したときは必ず基本から（前回の続きを覚えない）
     // 🔴【2026-08-01・Fable5監査L-18】入り直した理由を**画面に残す**。
     //   PINが要らない人は kanriOpen が即成功するので、作業中に突然ホームへ飛ぶ。
     //   何が起きたか分からないまま、書きかけが消えたように見える。
@@ -1156,7 +1212,7 @@
              '<div class="sub">' + esc(id) + "</div></div></div>" +
              '<div style="height:8px;"></div>' +
              '<div style="display:flex; gap:8px; align-items:flex-end;">' +
-             '<label class="f" style="flex:1; margin:0;"><span>ねだん（円）</span>' +
+             '<label class="f" style="flex:1; margin:0;"><span>値段（円）</span>' +
              '<input type="number" class="pri-in" inputmode="numeric" min="1" placeholder="0"></label>' +
              '<button type="button" class="btn primary pri-save" ' +
              'style="width:auto; min-width:104px; margin:0;"><span class="t">つける</span></button>' +
@@ -1238,7 +1294,7 @@
             var price = Number(input.value || 0);
             if (!price || price < 1) {
               out.className = "msg pri-r err";
-              out.textContent = "ねだんを入れてください。";
+              out.textContent = "値段を入れてください。";
               return;
             }
             var btn = c.querySelector(".pri-save");
@@ -1407,7 +1463,7 @@
       "</div></div></div>" +
       '<div style="height:8px;"></div>' +
       '<div style="display:flex; gap:8px; align-items:flex-end; margin-bottom:8px;">' +
-      '<label class="f" style="flex:1; margin:0;"><span>ねだん（円）</span>' +
+      '<label class="f" style="flex:1; margin:0;"><span>値段（円）</span>' +
       '<input type="number" class="lst-price" inputmode="numeric" min="1" value="' +
       (r.price == null ? "" : esc(r.price)) + '"></label>' +
       '<button type="button" class="btn primary lst-save" ' +
@@ -1424,7 +1480,7 @@
     function rev() { return c.getAttribute("data-rev"); }
     c.querySelector(".lst-save").addEventListener("click", function () {
       var p = Number(c.querySelector(".lst-price").value || 0);
-      if (!p || p < 1) { out.className = "msg lst-r err"; out.textContent = "ねだんを入れてください。"; return; }
+      if (!p || p < 1) { out.className = "msg lst-r err"; out.textContent = "値段を入れてください。"; return; }
       var b = c.querySelector(".lst-save");
       b.disabled = true;
       out.className = "msg lst-r"; out.textContent = "直しています…";
