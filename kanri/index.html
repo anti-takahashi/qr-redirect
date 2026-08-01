@@ -40,6 +40,26 @@
      ⚠️ 拡大できないのは本来よくないが、この画面は**店頭で立って使う道具**で、
         ずれた表示から戻れない方が実害が大きい（オーナー判断）。文字は元から大きくしてある。 */
   html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: manipulation; }
+
+  /* 🔴【2026-08-01・オーナー指摘】横向きにしない。
+     ⚠️ **Webからは本当に回転を止められない。** `screen.orientation.lock()` は
+        全画面表示が前提で、しかも **iOS Safari は対応していない**（実装が無い）。
+        「ロックした」つもりのコードを書いても1台も止まらないので、書かない。
+     → 効くのはこれ＝**横になったら縦に戻すよう頼む**。中身は隠す
+        （横のまま操作させると、1画面に2行しか出ず、レジで探すのに時間がかかる）。
+     ⚠️ 高さで絞る。絞らないとPCのブラウザ（常に横長）でも出てしまい、
+        こちらの動作確認ができなくなる。スマホの横＝高さ520px以下。 */
+  #rotate-note { display: none; }
+  @media (orientation: landscape) and (max-height: 520px) {
+    header, main { display: none !important; }
+    #rotate-note {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      position: fixed; inset: 0; background: var(--bg); color: var(--fg);
+      gap: 14px; padding: 24px; text-align: center;
+    }
+    #rotate-note .big { font-size: 20px; font-weight: 700; }
+    #rotate-note .sub { font-size: 15px; }
+  }
   html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
   body {
     font: 15px/1.75 "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
@@ -165,6 +185,12 @@
 </style>
 </head>
 <body>
+<!-- 横向きのときだけ出る。縦に戻せば消える（この画面は縦で使う道具） -->
+<div id="rotate-note" aria-hidden="true">
+  <div style="font-size:40px;">📱</div>
+  <div class="big">画面をたてにしてください</div>
+  <div class="sub">商品管理は、たての画面で使います。</div>
+</div>
 <div id="busy"></div>
 
 <header>
@@ -1483,7 +1509,6 @@
         //   （「火鉢」が棚に何個もある）。サーバ側には getPricingThumbnails という
         //   後追いで写真だけ取る口が既にあったのに、画面が一度も呼んでいなかった。
         h += '<div class="card" data-id="' + esc(id) + '" data-rev="' + esc(rev) + '">' +
-             '<div style="display:flex; gap:10px; align-items:flex-start;">' +
              openable(
              '<img class="pri-th" alt="" style="width:64px;height:64px;border-radius:10px;' +
              'object-fit:cover;background:#efe9de;flex:none;">' +
@@ -1774,7 +1799,7 @@
       '<div class="sub">' + esc(r.masterId) +
       (r.place ? "　" + esc(r.place) : "") +
       (r.legal ? '　<span style="color:var(--danger);">法規の確認あり</span>' : "") +
-      "</div>") +
+      "</div></div>") +
       '<div style="height:8px;"></div>' +
       '<div style="display:flex; gap:8px; align-items:flex-end; margin-bottom:8px;">' +
       '<label class="f" style="flex:1; margin:0;"><span>値段（円）</span>' +

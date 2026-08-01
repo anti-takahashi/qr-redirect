@@ -73,6 +73,11 @@
     <h1>商品管理をひらいています…</h1>
     <p class="sub" style="margin:10px 0 16px;">切り替わらないときは、下のボタンを押してください。</p>
     <a class="go" id="go" href="#">ひらく</a>
+    <!-- 🔴 新しい画面で詰まったときの逃げ道。小さく置く（ふだんは使わない）。
+         これを消すと、何かあったとき代表(父)・手伝いが全員止まる。 -->
+    <p style="margin-top:18px;">
+      <a class="ghost" id="go-old" href="#" style="font-size:14px;">これまでの管理ページをひらく</a>
+    </p>
   </div>
 
   <!-- 鍵が無いとき -->
@@ -146,8 +151,17 @@
 (function () {
   "use strict";
 
-  // 管理ページ本体（GAS）。ここに鍵を付けて渡す。
-  var ADMIN = "https://script.google.com/macros/s/AKfycbw2BGhgYrZujEVnpxEgkJsurAWLKD-KUZuMEuxb3ig302pBt7K1wE15a5Af3yaqCaoN/exec";
+  // 🔴【2026-08-01・オーナー承認「アクセスQRかえてかまいません」】
+  //   送り先を**新しい商品管理（自社ドメイン）**へ切り替えた。
+  //   ⚠️ QRそのものは `/adminlink/` 宛のまま＝**配ってある紙はそのまま使える**（刷り直し不要）。
+  //      変えたのは「読んだあとどこへ行くか」だけ。
+  //   ⚠️ 旧GASの管理画面は**消さない**。新しい方で詰まったときに
+  //      代表(父)・手伝いが全員止まると店が回らないので、逃げ道として下に残す。
+  var ADMIN = "https://qr.antiquekagu-takahashi.com/kanri/";
+  // これまでの管理ページ（GAS）。逃げ道としてだけ使う。
+  // 🔴 こちらへ渡すときは authuser=0 が要る。無いと複数Googleアカウントの端末で
+  //    /macros/u/1/s/… へ書き換えられて404になる（2026-07-29に実測）。
+  var ADMIN_OLD = "https://script.google.com/macros/s/AKfycbw2BGhgYrZujEVnpxEgkJsurAWLKD-KUZuMEuxb3ig302pBt7K1wE15a5Af3yaqCaoN/exec";
 
   // 🔴 鍵は端末に覚えておき、**ホーム画面のアイコンが指すURLには載せない**。
   //    URLに載せると、画面写し・共有・履歴からそのまま漏れる。
@@ -212,17 +226,20 @@
     try { history.replaceState(null, "", location.pathname); } catch (e) {}
   }
 
-  // 🔴 authuser=0 を必ず付ける。Googleに複数アカウントでログインしている端末では、
-  //    これが無いと /macros/s/… が /macros/u/1/s/… へ書き換えられて**404になる**
-  //    （2026-07-29に実測。キーQR側は2026-07-30に塞いだが、宛先をここへ移すと
-  //     GASへ渡すのはこの中継の役目になるので、塞ぎ直すのはここ）。
-  var sep = ADMIN.indexOf("?") >= 0 ? "&" : "?";
-  var target = key
-    ? ADMIN + sep + "authuser=0&k=" + encodeURIComponent(key)
-    : ADMIN + sep + "authuser=0";
+  // 新しい商品管理は自社ドメインなので authuser は要らない（GASではない）。
+  var target = key ? ADMIN + "?k=" + encodeURIComponent(key) : ADMIN;
+  // 🔴 逃げ道（旧GAS）にだけ authuser=0 を付ける。Googleに複数アカウントで
+  //    ログインしている端末では、これが無いと /macros/u/1/s/… へ書き換えられて404になる
+  //    （2026-07-29に実測）。**新しい方へ付けても意味が無いので付けない。**
+  var oldSep = ADMIN_OLD.indexOf("?") >= 0 ? "&" : "?";
+  var targetOld = key
+    ? ADMIN_OLD + oldSep + "authuser=0&k=" + encodeURIComponent(key)
+    : ADMIN_OLD + oldSep + "authuser=0";
   el("go").href = target;
   el("skip").href = target;
   el("skip-keep").href = target;
+  var oldLink = el("go-old");
+  if (oldLink) oldLink.href = targetOld;
   // 「追加した」を押したときだけ覚える。押さずに開いた人には次回また案内を出す。
   el("skip").addEventListener("click", function () {
     try { localStorage.setItem(ADDED_STORE, "1"); } catch (e) {}
