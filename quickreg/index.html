@@ -512,6 +512,20 @@
   var qs = new URLSearchParams(location.search);
   var token = qs.get('token') || '';
   var apiUrl = qs.get('api') || qs.get('apiUrl') || '';
+  // 🔴【2026-08-01・オーナー実機】「このタブを閉じてが押せない」。
+  //   新しい商品管理(/kanri/)は **同じタブ** でここへ来る（location.href）ので、
+  //   閉じるタブが存在せず window.close() は必ず失敗し、
+  //   「手動でタブを閉じ、元のタブに戻ってください」と出る＝**戻る先が無い行き止まり**。
+  //   （この文言は、GAS管理画面から別タブで開いていた頃のもの）
+  //   → 呼んだ側が戻り先を渡してきたときは、閉じずに**そこへ戻る**。
+  //   ⚠️ 受け取るのは**決め打ちの行き先だけ**。URLをそのまま受けると、
+  //      写真とトークンを扱うこの画面から任意の場所へ飛ばせてしまう。
+  var BACK_TARGETS = { kanri: '/kanri/' };
+  var backTo = BACK_TARGETS[String(qs.get('back') || '')] || '';
+  try {
+    if (backTo) sessionStorage.setItem('quickreg_back', backTo);
+    else backTo = BACK_TARGETS[String(sessionStorage.getItem('quickreg_back') || '').replace('/kanri/', 'kanri')] || '';
+  } catch (e) { /* 覚えられなくても今回は動く */ }
   try {
     if (token) {
       sessionStorage.setItem('quickreg_token', token);
@@ -533,6 +547,8 @@
     document.getElementById('fatal-panel').style.display = 'block';
   }
   window.closeOrGuide = function () {
+    // 同じタブで来ている（＝戻り先を渡されている）なら、閉じずに戻る
+    if (backTo) { location.href = backTo; return; }
     window.close();
     setTimeout(function () {
       document.getElementById('fatal-text').textContent =
@@ -540,6 +556,13 @@
       document.getElementById('fatal-panel').style.display = 'block';
     }, 400);
   };
+
+  // ボタンの文字も実物に合わせる（閉じられないのに「閉じて」と書かない）
+  (function () {
+    if (!backTo) return;
+    var b = document.querySelectorAll('[onclick="closeOrGuide()"]');
+    for (var i = 0; i < b.length; i++) b[i].textContent = '商品管理へ戻る';
+  })();
 
   if (!token || !apiUrl) {
     showFatal('開けませんでした', '必要な情報（トークン・接続先）が不足しています。管理画面の「かんたん新規登録」から開き直してください。', false);

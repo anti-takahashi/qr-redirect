@@ -121,6 +121,20 @@
   label.f > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
 
   .msg { font-size: 14px; margin-top: 10px; min-height: 1.6em; }
+
+  /* QR読み取り面。全画面を覆う＝店頭で片手でも狙いやすい */
+  #scan-overlay {
+    display: none; position: fixed; inset: 0; z-index: 60;
+    background: #1c1813; color: #fff;
+    padding: calc(14px + env(safe-area-inset-top)) 14px calc(14px + env(safe-area-inset-bottom));
+    flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  }
+  #scan-overlay.on { display: flex; }
+  #scan-box { width: 100%; max-width: 420px; border-radius: 14px; overflow: hidden; background: #000; }
+  #scan-box video { width: 100%; display: block; }
+  #scan-note { font-size: 15px; text-align: center; }
+  #scan-overlay .msg { color: #ffd9d0; text-align: center; }
+  #scan-overlay .btn { max-width: 420px; background: #fff; color: var(--fg); border-color: #fff; }
   .msg.err { color: var(--danger); font-weight: 700; }
   .msg.ok { color: var(--ok); font-weight: 700; }
 
@@ -198,14 +212,11 @@
     <button class="btn" data-go="sale">
       <span class="t">売上を入れる<span class="d">レジで売れたものを記録する</span></span>
     </button>
-    <button class="btn" data-go="search">
-      <span class="t">QRで探す・直す<span class="d">値段や補足を書き足す</span></span>
-    </button>
     <button class="btn" data-go="pricing">
       <span class="t">未値付けに値段をつける<span class="d">まだ値段の無いものを続けて</span></span>
     </button>
     <button class="btn" data-go="list">
-      <span class="t">商品一覧<span class="d">眺めて、値段やネット候補を入れる</span></span>
+      <span class="t">商品を探す・直す<span class="d">QRを読む／言葉で探す／値段と補足を書く</span></span>
     </button>
     <!-- 🔴 管理モードはオーナーだけ。ここを隠すのは**見やすさのため**であって、
          守っているのはサーバ側（requireAdmin_ が代表・手伝いを拒否する）。
@@ -249,6 +260,11 @@
         <input type="text" id="sale-input" inputmode="text" autocomplete="off"
                autocapitalize="off" spellcheck="false" placeholder="T-00123">
       </label>
+      <!-- 🔴【2026-08-01・オーナー指摘】「QRを読むか」と書いてあるのに
+           読む手段が画面に無かった（＝画面が嘘をついていた）。レジでは1点ずつ
+           手入力するのは現実的でないので、ここで読めるようにする。 -->
+      <button class="btn" id="sale-scan" type="button" style="min-height:56px;">
+        <span class="t" style="text-align:center;">QRを読む</span></button>
       <button class="btn primary" id="sale-add" type="button"><span class="t">かごに入れる</span></button>
       <div class="msg" id="sale-msg"></div>
     </div>
@@ -278,19 +294,13 @@
       <div id="sale-today" class="sub">読み込んでいます…</div>
     </div>
   </section>
-  <!-- QRで探す・直す: QR/IDから1点を開いて、値段と補足を書き足す
+  <!-- 商品（1点を開いた画面）。**入口は商品一覧だけ**。
+       🔴【2026-08-01・オーナー指示】「QR検索は商品一覧に組み込んで整理」。
+          QRを読む／IDを入れる／言葉で探す が別々の画面に分かれていて、
+          同じ「品を開く」ことをするのに入口が2つあった。入口を1つにする。
        🔴 searchProducts は使わない（店舗の人は使えない口。原価が乗る全列を返すため）。
           QR・IDの解決 → その1点だけ、が店舗モードの道。 -->
   <section class="view" id="v-search">
-    <div class="card">
-      <label class="f">
-        <span>QRを読むか、商品ID（T-00123）を入れる</span>
-        <input type="text" id="sch-input" inputmode="text" autocomplete="off"
-               autocapitalize="off" spellcheck="false" placeholder="T-00123">
-      </label>
-      <button class="btn primary" id="sch-go" type="button"><span class="t">開く</span></button>
-      <div class="msg" id="sch-msg"></div>
-    </div>
     <div id="sch-detail"></div>
   </section>
 
@@ -305,6 +315,21 @@
 
   <!-- 商品一覧: 眺めて気づいたことを入れる（ねだん・ネット候補） -->
   <section class="view" id="v-list">
+    <!-- 🔴【2026-08-01・オーナー指示】QR検索をここへ組み込んだ。
+         現物が手元にあるなら上（QRを読む／IDを入れる）、
+         手元に無いなら下（言葉で探す）。**同じ画面で両方できる**。 -->
+    <div class="card">
+      <label class="f">
+        <span>QRを読むか、商品ID（T-00123）を入れる</span>
+        <input type="text" id="sch-input" inputmode="text" autocomplete="off"
+               autocapitalize="off" spellcheck="false" placeholder="T-00123">
+      </label>
+      <button class="btn" id="sch-scan" type="button" style="min-height:56px;">
+        <span class="t" style="text-align:center;">QRを読む</span></button>
+      <button class="btn primary" id="sch-go" type="button"><span class="t">開く</span></button>
+      <div class="msg" id="sch-msg"></div>
+    </div>
+
     <div class="card">
       <label class="f">
         <span>探す言葉（空のままなら全部）</span>
@@ -329,6 +354,11 @@
         <input type="text" id="edt-input" autocomplete="off" autocapitalize="off"
                spellcheck="false" placeholder="T-00123">
       </label>
+      <!-- 🔴【2026-08-01・オーナー指摘】「QRを読むか」と書いてあるのに
+           読む手段が画面に無かった（＝画面が嘘をついていた）。レジでは1点ずつ
+           手入力するのは現実的でないので、ここで読めるようにする。 -->
+      <button class="btn" id="edt-scan" type="button" style="min-height:56px;">
+        <span class="t" style="text-align:center;">QRを読む</span></button>
       <button class="btn primary" id="edt-go" type="button"><span class="t">開く</span></button>
       <div class="msg" id="edt-msg"></div>
     </div>
@@ -343,6 +373,11 @@
         <input type="text" id="net-input" autocomplete="off" autocapitalize="off"
                spellcheck="false" placeholder="T-00123">
       </label>
+      <!-- 🔴【2026-08-01・オーナー指摘】「QRを読むか」と書いてあるのに
+           読む手段が画面に無かった（＝画面が嘘をついていた）。レジでは1点ずつ
+           手入力するのは現実的でないので、ここで読めるようにする。 -->
+      <button class="btn" id="net-scan" type="button" style="min-height:56px;">
+        <span class="t" style="text-align:center;">QRを読む</span></button>
       <button class="btn primary" id="net-go" type="button"><span class="t">確かめる</span></button>
       <div class="msg" id="net-msg"></div>
     </div>
@@ -355,6 +390,16 @@
     <div id="q-list"></div>
   </section>
 </main>
+
+<!-- QR読み取り（4画面で共用・1つだけ）。
+     🔴 カメラは**開いている間だけ**動かす。閉じる・別の画面へ行く・アプリを裏へ回す、
+        どれでも必ず止める（端末のカメラランプが点いたままにならないように）。 -->
+<div id="scan-overlay" aria-hidden="true">
+  <div id="scan-box"></div>
+  <div id="scan-note">QRラベルを枠の中に写してください</div>
+  <div id="scan-msg" class="msg"></div>
+  <button class="btn" id="scan-cancel" type="button"><span class="t" style="text-align:center;">やめる</span></button>
+</div>
 
 <script>
 (function () {
@@ -609,7 +654,12 @@
         throw new Error("いま混み合っているようです。少し時間をおいてもう一度お試しください。");
       }
       if (/failed to fetch|networkerror|load failed/i.test(m)) {
-        throw new Error("電波が届いていないようです。つながる場所でもう一度お試しください。");
+        // 🔴【2026-08-01】畳んだ文言は**推測**なので、原文を捨てない。
+        //   iOSは通信不良もサーバの応答不良も同じ "Load failed" を出すため、
+        //   「電波が届いていない」と言い切ると、こちらの推測の代金をオーナーが払う。
+        var e2 = new Error("うまくつながりませんでした。少し時間をおいてもう一度お試しください。");
+        e2.raw = m;
+        throw e2;
       }
       throw e;
     }).finally(function () { busy(false); });
@@ -670,6 +720,103 @@
   }
   $("home-tab-basic").addEventListener("click", function () { showHomeTab("basic"); });
   $("home-tab-owner").addEventListener("click", function () { showHomeTab("owner"); });
+
+  // ==========================================================================
+  // QRを読む（4画面で共用）
+  //
+  // 🔴【2026-08-01・オーナー指摘】「QRを読むか、商品IDを入れる」と4画面に書いてあるのに、
+  //    **読む手段がどこにも無かった**。レジで1点ずつ T-00123 と打つのは現実的でない。
+  //
+  // 解読は /quickreg/ に同梱してある html5-qrcode をそのまま使う（同じドメイン・外部CDN非依存）。
+  //   ・376KBあるので**押した瞬間に初めて読み込む**（開くたびに待たせない）
+  //   ・読めた文字列はそのまま resolveScanToMasterId へ渡す（URLでもIDでもサーバが解く）
+  // ⚠️ カメラは開いている間だけ動かす。閉じる・別の画面へ行く・アプリを裏へ回す、
+  //    どれでも必ず止める（ランプが点いたままになると、店では「壊れた」と受け取られる）。
+  // ==========================================================================
+  var QR_LIB_URL = "../quickreg/html5-qrcode.min.js";
+  var scanner = null;       // Html5Qrcode（動いている間だけ非null）
+  var scanOnDone = null;    // 読めたときに呼ぶ関数
+  var scanStarting = false;
+
+  function loadQrLib() {
+    if (typeof Html5Qrcode !== "undefined") return Promise.resolve();
+    return new Promise(function (ok, ng) {
+      var el = document.createElement("script");
+      el.src = QR_LIB_URL;
+      el.onload = function () {
+        if (typeof Html5Qrcode === "undefined") ng(new Error("QRの読み取りを用意できませんでした。"));
+        else ok();
+      };
+      el.onerror = function () { ng(new Error("QRの読み取りを用意できませんでした（通信を確かめてください）。")); };
+      document.head.appendChild(el);
+    });
+  }
+
+  function scanMsg(text, cls) {
+    var m = $("scan-msg");
+    m.className = "msg" + (cls ? " " + cls : "");
+    m.textContent = text || "";
+  }
+
+  // 何度呼んでも安全。**必ずカメラを手放す**
+  function stopScan() {
+    var s = scanner;
+    scanner = null;
+    scanOnDone = null;
+    $("scan-overlay").className = "";
+    $("scan-overlay").setAttribute("aria-hidden", "true");
+    if (!s) return Promise.resolve();
+    return s.stop().then(function () { try { s.clear(); } catch (e) {} })
+      .catch(function () { try { s.clear(); } catch (e) {} });
+  }
+
+  function startScan(onDone) {
+    if (scanStarting || scanner) return;
+    scanStarting = true;
+    scanOnDone = onDone;
+    $("scan-overlay").className = "on";
+    $("scan-overlay").setAttribute("aria-hidden", "false");
+    scanMsg("カメラを用意しています…", "");
+    loadQrLib().then(function () {
+      scanner = new Html5Qrcode("scan-box", false);
+      return scanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 240, height: 240 } },
+        function (text) {
+          var f = scanOnDone;
+          stopScan().then(function () { if (f) f(String(text || "")); });
+        },
+        function () { /* 1コマ読めないのは普通のこと。何も出さない */ }
+      );
+    }).then(function () {
+      scanStarting = false;
+      scanMsg("", "");
+    }).catch(function (e) {
+      scanStarting = false;
+      var name = (e && e.name) || "";
+      var msg;
+      if (name === "NotAllowedError" || name === "SecurityError") {
+        msg = "カメラの使用が許可されていません。アドレスバーの鍵マークから、"
+            + "このサイトのカメラを「許可」にしてもう一度お試しください。";
+      } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+        msg = "この端末で使えるカメラが見つかりませんでした。";
+      } else if (name === "NotReadableError") {
+        msg = "カメラを他のアプリが使用中のようです。閉じてからもう一度お試しください。";
+      } else {
+        msg = (e && e.message) || "カメラを開けませんでした。";
+      }
+      // 🔴 無言で止まらない。読めないときは手入力で先へ進めることを必ず伝える
+      scanMsg(msg + "　商品ID（T-00123）の手入力でも先へ進めます。", "err");
+      scanner = null;
+    });
+  }
+
+  $("scan-cancel").addEventListener("click", function () { stopScan(); });
+  // 画面を裏へ回した・タブを離れたときも手放す（店では画面をすぐ切り替える）
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden && scanner) stopScan();
+  });
+  window.addEventListener("pagehide", function () { if (scanner) stopScan(); });
 
   function enter(session, who, role) {
     SESSION = session || "";
@@ -742,10 +889,20 @@
     }).finally(function () { QR_PRE.getting = false; });
   }
 
+  // 🔴【2026-08-01・オーナー実機】ここは **同じタブ** で /quickreg/ へ行く。
+  //   向こうの「このタブを閉じて管理画面へ戻る」は別タブ前提の作りなので、
+  //   閉じるタブが無く**行き止まり**になっていた。戻り先を渡して、戻れるようにする。
+  //   ⚠️ 渡すのは合図（back=kanri）だけ。URLをそのまま渡すと、向こうを踏み台にして
+  //      よそへ飛ばせるようになる（受け側も決め打ちの行き先しか受け付けない）。
+  function withBack(url) {
+    if (!url) return url;
+    return url + (url.indexOf("?") === -1 ? "?" : "&") + "back=kanri";
+  }
+
   function openQuickReg() {
     // 用意が済んでいれば、画面を出さずにそのまま飛ぶ（1タップ）
     if (QR_PRE.url && Date.now() < QR_PRE.expMs - QR_MIN_REMAIN_MS) {
-      location.href = QR_PRE.url;
+      location.href = withBack(QR_PRE.url);
       return;
     }
     // 間に合っていないときだけ画面を出す＝待たされている理由が見える
@@ -754,7 +911,7 @@
     msg.className = "msg";
     msg.textContent = "準備しています…";
     call("issueQuickRegToken", {}).then(function (r) {
-      if (r && r.url) { location.href = r.url; return; }
+      if (r && r.url) { location.href = withBack(r.url); return; }
       msg.className = "msg err";
       msg.textContent = "登録ページのURLを受け取れませんでした。もう一度お試しください。";
     }).catch(function (e) {
@@ -1159,6 +1316,9 @@
         return;
       }
       msg.textContent = "";
+      // 🔴 入力欄は商品一覧にあるので、ここで詳細の画面へ移る（移らないと結果が見えない）。
+      //    stack に積まれるので「←」で一覧へ帰れる。
+      if (stack[stack.length - 1] !== "search") go("search");
       openDetail(id, seq);
     }).catch(function (e) {
       if (isStale("sch", seq)) return;   // ⑤古い失敗で今の画面を潰さない
@@ -1170,9 +1330,7 @@
   $("sch-input").addEventListener("keydown", function (e) {
     if (e.key === "Enter") { e.preventDefault(); schGo(); }
   });
-  ONSHOW["search"] = function () {
-    setTimeout(function () { $("sch-input").focus(); }, 60);
-  };
+  // 詳細の画面は入口を持たなくなった（入口は商品一覧）。ここで focus するものは無い。
 
   // ==========================================================================
   // 未値付けに値段をつける
@@ -1471,6 +1629,13 @@
       "</div>" +
       '<button type="button" class="btn lst-cand" style="margin:0;">' +
       '<span class="t">' + (r.netCand === "✓" ? "✓ ネット候補にしている" : "ネット候補にする") + "</span></button>" +
+      // 🔴【2026-08-01・オーナー実機】この一覧は値段とネット候補しか触れず、
+      //   「実質、未値付け画面の情報が多い版」になっていた（オーナーの言葉）。
+      //   タップしても何も起きず、**補足を書き足せない**。
+      //   docs では「QR検索と商品一覧は入口が違うだけで開く先は同じ部品」と決めてあるのに、
+      //   一覧からその部品へ行く道を作っていなかった。
+      '<button type="button" class="btn lst-open" style="margin:8px 0 0;">' +
+      '<span class="t">開く（置き場所・補足を見る／書く）</span></button>' +
       '<div class="msg lst-r"></div></div>';
   }
 
@@ -1524,7 +1689,20 @@
           out.className = "msg lst-r err"; out.textContent = e.message;
         }).finally(function () { b.disabled = false; });
     });
-  }
+  
+    // 一覧から詳細を開く。**開く先はQR検索と同じ**（画面を増やさない）
+    var openBtn = c.querySelector(".lst-open");
+    if (openBtn) {
+      openBtn.addEventListener("click", function () {
+        var id = c.getAttribute("data-id");
+        if (!id) return;
+        go("search");   // stack に積まれるので「←」で一覧へ帰れる
+        $("sch-input").value = id;
+        $("sch-msg").textContent = "";
+        openDetail(id, bumpSeq("sch"));
+      });
+    }
+}
 
   // 「もっと見る」は同じ検索の続きなので、世代を進めずに引き継ぐ。
   //   新しい検索（more でない）ときだけ進める＝古い結果が混ざらない。
@@ -1579,7 +1757,11 @@
     if (e.key === "Enter") { e.preventDefault(); $("lst-go").click(); }
   });
   $("lst-more").addEventListener("click", function () { loadList(true); });
-  ONSHOW["list"] = function () { if (!$("lst-list").children.length) loadList(false); };
+  ONSHOW["list"] = function () {
+    // 現物が手元にあるときが多いので、開いたらQR/IDの欄にカーソルを置く
+    setTimeout(function () { $("sch-input").focus(); }, 60);
+    if (!$("lst-list").children.length) loadList(false);
+  };
 
   // ==========================================================================
   // ここから管理モード（オーナーのみ）
@@ -1905,8 +2087,20 @@
       box.innerHTML = h;
     }).catch(function (e) {
       // 🔴 読めなかったことを「0件」と混ぜない
+      // 🔴【2026-08-01・オーナー実機「PC版にはリストあるがこっちは出ない」】
+      //   ここは**行き止まり**だった＝読み直す手段が無く、
+      //   しかも失敗の中身が「電波が届いていない」に畳まれていて、
+      //   本当に何が起きたのかが分からない（こちらの推測をオーナーに読ませていた）。
+      //   → 読み直すボタンを出し、畳む前の原文も小さく添える。
       msg.className = "msg err";
       msg.textContent = "出品リストが読めていません（0件ではありません）。" + e.message;
+      box.innerHTML = '<div class="card">' +
+        '<button class="btn primary" type="button" id="q-retry">' +
+        '<span class="t">読み直す</span></button>' +
+        '<div class="sub" style="margin-top:8px; word-break:break-all;">' +
+        "くわしい理由: " + esc(String((e && e.raw) || (e && e.message) || "")) + "</div></div>";
+      var rb = $("q-retry");
+      if (rb) rb.addEventListener("click", function () { rb.disabled = true; loadQueue(); });
     });
   }
   ONSHOW["queue"] = loadQueue;
