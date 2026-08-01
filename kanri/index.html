@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>商品管理｜アンティーク家具たかはし</title>
 
 <!-- 🔴【2026-08-01】ここは**自社ドメイン**なので、外側の <head> が自分のものになる。
@@ -29,6 +29,17 @@
     --ok: #2f7a4d; --danger: #c0392b;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  /* 🔴【2026-08-01・オーナー指摘】勝手に拡大されて画面が動かなくなる。
+     原因は3つあり、**どれか1つを塞いでも残りで起きる**ので全部塞ぐ:
+       ① 入力欄の文字が16px未満 → iOSは触った瞬間に**自動で拡大**する（これが主因）
+       ② タイルを続けて押すと「ダブルタップ拡大」に取られる
+       ③ 指2本のつまみ拡大
+     ⚠️ `user-scalable=no` は **iOS Safari が無視する**（10以降・アクセシビリティのため）。
+        meta だけ書いて直したつもりにならない。iOSに効くのは ① と、下の gesturestart。
+     ⚠️ 拡大できないのは本来よくないが、この画面は**店頭で立って使う道具**で、
+        ずれた表示から戻れない方が実害が大きい（オーナー判断）。文字は元から大きくしてある。 */
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: manipulation; }
   html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
   body {
     font: 15px/1.75 "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
@@ -112,10 +123,15 @@
   .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
   .btn.primary .t { flex: 1; text-align: center; }
 
-  input[type="tel"], input[type="text"], input[type="number"] {
+  /* 🔴 16px を下回らせない。下回るとiOSが触った瞬間に画面ごと拡大する。
+     ⚠️ `font: inherit` だと本文の15pxを継いでしまうので、ここで明示する。
+        新しい入力欄を足すときも**必ず16px以上**にすること。 */
+  input[type="tel"], input[type="text"], input[type="number"],
+  input[type="search"], select, textarea {
     width: 100%; min-height: 52px; padding: 10px 12px;
     border: 1px solid var(--line); border-radius: 12px;
-    font: inherit; background: #fff; color: var(--fg);
+    font-family: inherit; font-size: 16px; line-height: 1.5;
+    background: #fff; color: var(--fg);
   }
   label.f { display: block; margin-bottom: 12px; }
   label.f > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
@@ -826,6 +842,13 @@
       scanner = null;
     });
   }
+
+  // 🔴 指2本のつまみ拡大を止める。iOSは `user-scalable=no` を無視するので、
+  //    Safari独自の gesture イベントを止めるのが唯一効く手。
+  //    ⚠️ passive:false を明示しないと preventDefault が効かない。
+  ["gesturestart", "gesturechange", "gestureend"].forEach(function (ev) {
+    document.addEventListener(ev, function (e) { e.preventDefault(); }, { passive: false });
+  });
 
   $("scan-cancel").addEventListener("click", function () { stopScan(); });
   // 画面を裏へ回した・タブを離れたときも手放す（店では画面をすぐ切り替える）
