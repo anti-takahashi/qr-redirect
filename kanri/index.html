@@ -169,6 +169,12 @@
       <button class="btn" data-go="netlist">
         <span class="t">QRからネット出品<span class="d">出せるか確かめて、出品リストへ送る</span></span>
       </button>
+      <!-- 🔴【2026-08-01・Codex監査6】管理モードは3つ（CLAUDE.md）だが2つしか無かった。
+           ⚠️ ここは**見るだけ**にする。出す／出さないの判断はPC版が持つ
+              （判断の位は owner_pc が最上位。スマホから決めると位が下の書込みになる）。 -->
+      <button class="btn" data-go="queue">
+        <span class="t">出品リスト<span class="d">いま送ってある品を見る（決めるのはPC版）</span></span>
+      </button>
     </div>
 
     <div class="card sub" style="margin-top:14px;">
@@ -295,6 +301,12 @@
       <div class="msg" id="net-msg"></div>
     </div>
     <div id="net-detail"></div>
+  </section>
+
+  <!-- ⑥ 出品リスト（見るだけ） -->
+  <section class="view" id="v-queue">
+    <div class="msg" id="q-msg">読み込んでいます…</div>
+    <div id="q-list"></div>
   </section>
 </main>
 
@@ -428,7 +440,20 @@
       if (!res || !res.ok) {
         throw new Error(String((res && res.error) || "不明なエラー").replace(/^Error:\s*/, ""));
       }
-      return res.result;
+      // 🔴【2026-08-01・カタログ側の同型不具合から横展開】okが**2枚ある**。
+      //   外側は「doPostが処理を呼べた」、内側は「その処理が成立した」。
+      //   外側しか見ていなかったので、createSale が二重計上を止めたとき
+      //   （{ok:false, conflict:true}）でも画面は「会計しました。」と出して
+      //   **かごを空にしていた**＝売上が記録されないのに、店員は済んだと思う。
+      //   売上の打ち漏らしは後から気づけないので、ここは必ず落とす。
+      //   ⚠️ 内側に ok を持たない返り値（配列・null）もあるので、
+      //      「okという名前が実際に付いているとき」だけ見る。
+      var inner = res.result;
+      if (inner && typeof inner === "object" && !Array.isArray(inner)
+          && Object.prototype.hasOwnProperty.call(inner, "ok") && inner.ok === false) {
+        throw new Error(String(inner.error || inner.reason || "できませんでした。もう一度お試しください。"));
+      }
+      return inner;
     }).catch(function (e) {
       // 🔴 ブラウザが出す英語をそのまま見せない（店の人には意味が分からない）。
       //    "Failed to fetch" は圏外・機内モード・接続先が違う のどれか。
@@ -644,6 +669,17 @@
           return;
         }
       }
+      // 🔴【2026-08-01・Codex監査4】値段が無い品をかごに入れない。
+      //   以前はサーバが空欄を0円に読み替えて返していたので、そのまま0円で会計が通り、
+      //   売上にも取引台帳にも0円で残った（画面の合計もサーバの計算も0円になるので、
+      //   金額の照合でも気づけない）。後から「いくらで売ったか」を復元できない。
+      if (it.listPrice === null || it.listPrice === undefined) {
+        msg.className = "msg err";
+        msg.textContent = "この品はまだ値段がついていません（" + it.masterId +
+          "）。ホームの「ねだんをつける」で先に入れてください。";
+        $("sale-input").value = "";
+        return;
+      }
       // 🔴 売れている品を黙って入れない
       if (it.stockStatus && it.stockStatus !== "在庫あり") {
         msg.className = "msg err";
@@ -690,9 +726,11 @@
       discountSpec: dv > 0 ? { type: $("sale-disc-type").value, value: dv } : null,
       // 🔴 画面に出していた合計。サーバの計算と違えば拒否される（値段が動いた検知）
       expectedTotal: sub - d
-    }).then(function () {
+    }).then(function (r) {
       res.className = "msg ok";
-      res.textContent = "会計しました。";
+      // 🔴 サーバが「既に登録済み」と言ったらそう出す（通信のやり直し等で2回届いた場合）。
+      //    「会計しました。」と出すと、もう一度会計しようとして本当の二重計上を招く。
+      res.textContent = (r && r.idempotent && r.note) ? String(r.note) : "会計しました。";
       cart = [];
       saleOpId = "";
       $("sale-disc").value = "";
@@ -732,7 +770,15 @@
         (function (b) {
           b.addEventListener("click", function () {
             var id = b.getAttribute("data-id");
-            if (!window.confirm(id + " の売上を取り消します。よろしいですか？")) return;
+            // 🔴【2026-08-01・Codex監査8】取り消せるのは**この店の記録だけ**。
+            //   自社ECのSOLD OUT化やフリマの取り下げは戻らない（GAS側にも同じ注意書きがある）。
+            //   「取消しました」とだけ出すと、ネット側も戻ったと思い込み、
+            //   一点物が二重に売れる（一番取り返しがつかない）。
+            if (!window.confirm(
+              id + " の売上を取り消します。\n\n" +
+              "※お店の記録だけが戻ります。ネットに出していた品は、\n" +
+              "　ネット側の在庫は戻りません（オーナーに伝えてください）。\n\nよろしいですか？"
+            )) return;
             b.disabled = true;
             call("undoTodaySale", { masterId: id }).then(function () {
               loadToday();
@@ -766,19 +812,31 @@
   function openDetail(masterId) {
     var box = $("sch-detail");
     box.innerHTML = '<div class="card sub">読み込んでいます…</div>';
-    call("getAdminProductDetail", { masterId: masterId }).then(function (d) {
+    // 🔴【2026-08-01・Codex監査1】ここは getAdminProductDetail を呼んでいた。
+    //   あれは**全列**を返す（仕入れ値・保管場所・仕入先・売値）。画面に出していなくても、
+    //   店舗モードのセッションで口が開いていれば読めてしまう。
+    //   返す列を固定した store 専用の口へ差し替えた（写真のDrive走査も無いので速い）。
+    call("getStoreProductDetail", { masterId: masterId }).then(function (d) {
       if (!d) {
         box.innerHTML = '<div class="card"><span class="msg err">この商品が見つかりません。</span></div>';
         return;
       }
       var rev = d["更新バージョン"];
-      var memo = d["補足メモ"] || "";
+      // 🔴【2026-08-01・Codex監査2】列名は "補足メモ" ではなく "補足・訂正メモ(人間)"。
+      //   ずれていたので、既存メモは常に空欄に見え、保存すると必ず拒否されていた
+      //   （STORE_EDITABLE_FIELDS が正しい列名しか受け付けないため）。
+      var memo = d["補足・訂正メモ(人間)"] || "";
       box.innerHTML =
         '<div class="card">' +
         "<h2>" + esc(d["商品名"] || masterId) + "</h2>" +
         '<div class="sub" style="margin-bottom:10px;">' + esc(masterId) +
         "　" + (d["店頭価格"] === "" || d["店頭価格"] == null ? "値段まだ" : yen(d["店頭価格"])) +
         "　" + esc(d["在庫ステータス"] || "") + "</div>" +
+        // 🔴【2026-08-01・Codex監査(3周目)3】保管場所を**画面に出す**。
+        //   サーバは返すようにしたのに表示していなかった＝「父が現物を探せるように」という
+        //   今回の意図がJSONまでで止まっていた（返しただけでは誰も見られない）。
+        (d["保管場所"] ? '<div class="sub" style="margin-bottom:10px;">置き場所: ' +
+          esc(d["保管場所"]) + "</div>" : "") +
         '<label class="f"><span>補足（気づいたことを足していく）</span>' +
         '<textarea id="sch-memo" rows="5" style="width:100%;min-height:120px;padding:10px 12px;' +
         'border:1px solid var(--line);border-radius:12px;font:inherit;background:#fff;' +
@@ -794,7 +852,7 @@
         // 🔴 版数を必ず添える。無いとサーバが拒否する（古い内容で上書きさせない歯止め）。
         call("updateProductFields", {
           masterId: masterId,
-          patch: { "補足メモ": v, __expectedRev: rev }
+          patch: { "補足・訂正メモ(人間)": v, __expectedRev: rev }
         }).then(function () {
           m.className = "msg ok";
           m.textContent = "保存しました。";
@@ -863,9 +921,17 @@
         var id = r.masterId || r["マスターID"] || "";
         var nm = r.name || r["商品名"] || id;
         var rev = (r.rev != null ? r.rev : r["更新バージョン"]) || 0;
+        // 🔴【2026-08-01・Codex監査7】写真を出す。骨董は名前だけでは取り違える
+        //   （「火鉢」が棚に何個もある）。サーバ側には getPricingThumbnails という
+        //   後追いで写真だけ取る口が既にあったのに、画面が一度も呼んでいなかった。
         h += '<div class="card" data-id="' + esc(id) + '" data-rev="' + esc(rev) + '">' +
+             '<div style="display:flex; gap:10px; align-items:flex-start;">' +
+             '<img class="pri-th" alt="" style="width:64px;height:64px;border-radius:10px;' +
+             'object-fit:cover;background:#efe9de;flex:none;">' +
+             '<div style="flex:1; min-width:0;">' +
              "<h2 style=\"font-size:15px;\">" + esc(nm) + "</h2>" +
-             '<div class="sub" style="margin-bottom:8px;">' + esc(id) + "</div>" +
+             '<div class="sub">' + esc(id) + "</div></div></div>" +
+             '<div style="height:8px;"></div>' +
              '<div style="display:flex; gap:8px; align-items:flex-end;">' +
              '<label class="f" style="flex:1; margin:0;"><span>ねだん（円）</span>' +
              '<input type="number" class="pri-in" inputmode="numeric" min="1" placeholder="0"></label>' +
@@ -875,6 +941,41 @@
              '<div class="msg pri-r"></div></div>';
       }
       box.innerHTML = h;
+      // 写真は後から。取れなくても値付けは続けられる（行き止まりにしない）。
+      // 🔴【2026-08-01・Codex監査4】**12点ずつ分けて取る**。
+      //   サーバは1回の要求で先頭12件しか見に行かない（PRICING_THUMB_MAX_PER_CALL_）。
+      //   全IDを1回で送っていたので、13点目以降は追加の要求が無く**写真が永久に空欄**だった。
+      //   未値付けは一度に最大500点まで並ぶので、ほとんどの行が写真無しになる。
+      //   ⚠️ 上限はサーバ側の都合（Driveを見に行く回数）なので、こちらで勝手に増やさない。
+      var ids = [];
+      for (var k = 0; k < rows.length; k++) {
+        ids.push(rows[k].masterId || rows[k]["マスターID"] || "");
+      }
+      var THUMB_BATCH = 12;
+      function fetchThumbs(from) {
+        if (from >= ids.length) return;
+        var part = ids.slice(from, from + THUMB_BATCH);
+        call("getPricingThumbnails", { masterIds: part }).then(function (map) {
+          if (map) {
+            var cs = box.querySelectorAll(".card");
+            for (var m = 0; m < cs.length; m++) {
+              var u = map[cs[m].getAttribute("data-id")];
+              var im = cs[m].querySelector(".pri-th");
+              if (u && im && !im.src) im.src = u;
+            }
+          }
+          fetchThumbs(from + THUMB_BATCH);   // 続きを取る（前の分が終わってから＝一度に押し寄せない）
+        }).catch(function (e) {
+          // 🔴【2026-08-01・Codex監査(3周目)2】続きは**成功側にしか書いていなかった**。
+          //   1回でも失敗すると、そこから先は要求すらされず写真が永久に空欄になる
+          //   （しかも何も出ないので、電波が一瞬切れただけと気づけない）。
+          //   ログインが切れた時だけ止める。それ以外は次へ進む。
+          if (isAuthError(e)) return;
+          fetchThumbs(from + THUMB_BATCH);
+        });
+      }
+      fetchThumbs(0);
+
       var cards = box.querySelectorAll(".card");
       for (var j = 0; j < cards.length; j++) {
         (function (c) {
@@ -894,16 +995,57 @@
               masterId: c.getAttribute("data-id"),
               price: price,
               expectedRev: c.getAttribute("data-rev")
-            }).then(function () {
+            }).then(function (res) {
+              // 🔴【2026-08-01・Codex監査3】サーバが「仮案として送っただけ」と言うことがある。
+              //   上位者（オーナー）の判断が既にある品は正本を書き換えず proposal:true を返す。
+              //   返り値を見ずに「つけました」と出していたので、**値段は変わっていないのに
+              //   ついたと思って会計へ進む**（店頭で違う値段を言うことになる）。
+              if (res && res.proposal) {
+                out.className = "msg pri-r";
+                out.textContent = String(res.message ||
+                  "オーナーの判断があるため、仮案としてオーナーへ送りました。");
+                btn.disabled = false;
+                return;   // 正本も版数も動いていないので、戻すボタンは出さない
+              }
+              // 🔴【2026-08-01・Codex監査2】版数を取り直す。
+              //   値付けが通るとサーバは更新バージョンを必ず +1 する。
+              //   data-rev を古いままにしていたので、そのあと「戻す」を押すと
+              //   必ず版数不一致で拒否された＝**取り消しが一度も成功しない**。
+              if (res && res.rev != null) c.setAttribute("data-rev", String(res.rev));
+              // 🔴【2026-08-01・Codex監査7】「間違えても自分で戻せる」をつなぐ。
+              //   サーバには undoStorePrice（15分以内）があったのに画面から呼んでおらず、
+              //   700msでカードが消えるだけだった＝桁を1つ間違えても取り返せない。
+              //   主な使い手は代表(父)なので、ここは戻せることが要件。
               out.className = "msg pri-r ok";
-              out.textContent = "つけました。";
-              // 片付いたので、その場から消す（続けて次へ進める）
-              setTimeout(function () {
+              out.innerHTML = "つけました（" + esc(yen(price)) + "）。&nbsp;" +
+                '<button type="button" class="pri-undo" style="min-height:44px;padding:6px 14px;' +
+                'border:1px solid var(--line);border-radius:10px;background:#fff;font:inherit;' +
+                'font-weight:700;cursor:pointer;">まちがえた（戻す）</button>';
+              var undo = out.querySelector(".pri-undo");
+              var closeTimer = setTimeout(function () {
                 c.remove();
                 var left = box.querySelectorAll(".card").length;
                 $("pri-count").textContent = "（" + left + "点）";
                 if (!left) { msg.className = "msg ok"; msg.textContent = "全部つけ終わりました。"; }
-              }, 700);
+              }, 8000);   // 押す間を置く（700msでは戻すボタンを読む前に消えていた）
+              undo.addEventListener("click", function () {
+                clearTimeout(closeTimer);
+                undo.disabled = true;
+                call("undoStorePrice", {
+                  masterId: c.getAttribute("data-id"),
+                  expectedRev: c.getAttribute("data-rev")
+                }).then(function () {
+                  out.className = "msg pri-r";
+                  out.textContent = "戻しました。もう一度つけてください。";
+                  input.value = "";
+                  btn.disabled = false;
+                  loadPricing();     // 版数が変わるので取り直す
+                }).catch(function (e2) {
+                  undo.disabled = false;
+                  out.className = "msg pri-r err";
+                  out.textContent = e2.message;
+                });
+              });
             }).catch(function (e) {
               btn.disabled = false;
               out.className = "msg pri-r err";
@@ -929,13 +1071,70 @@
   // ==========================================================================
   var LST = { offset: 0, limit: 50, keyword: "", done: false };
 
+  // 🔴【2026-08-01・Codex監査(3周目)4】写真を出す。
+  //   このカードから**店頭価格とネット候補を変えられる**のに、名前とIDしか出ていなかった。
+  //   骨董は「火鉢」「木彫の鳥」のように似た名前が並ぶので、名前だけでは別の品を触りうる。
+  //   値付け画面と同じ後追い方式（画像キャッシュから12点ずつ）。Driveは見に行かない。
+  // 🔴【2026-08-01・Codex監査(4周目)3】写真が出ない理由を**区別できるようにする**。
+  //   写真は誤操作の歯止めとして足したのに、失敗すると「写真の無い品」と同じ空欄になり、
+  //   歯止めが黙って消えていた。父・手伝いには次の3つが同じに見える:
+  //     ①本当に写真が無い ②画像キャッシュに無い ③通信やDriveの取得に失敗した
+  //   サーバは「写真フォルダが登録されているか(hasPhoto)」を返しているので、
+  //   **登録されているのに出せなかったカードだけ**その旨を出す。操作自体は止めない
+  //   （オーナー方針＝店舗側で弾かない。気づける形にするのが役目）。
+  function lstMarkNoThumb(part) {
+    var cs = $("lst-list").querySelectorAll(".card");
+    for (var m = 0; m < cs.length; m++) {
+      var id = cs[m].getAttribute("data-id");
+      if (part.indexOf(id) === -1) continue;
+      var im = cs[m].querySelector(".lst-th");
+      if (!im || im.src) continue;
+      if (cs[m].getAttribute("data-haspic") !== "1") continue;  // 元から写真が無い品は何も出さない
+      if (cs[m].querySelector(".lst-nothumb")) continue;
+      var note = document.createElement("div");
+      note.className = "sub lst-nothumb";
+      note.style.cssText = "font-size:12px;color:var(--danger);";
+      note.textContent = "写真を読めませんでした（品物を確かめてから直してください）";
+      im.parentNode.appendChild(note);
+    }
+  }
+
+  function lstThumbs(ids, from) {
+    if (from >= ids.length) return;
+    var part = ids.slice(from, from + 12);
+    // cacheOnly＝画像キャッシュだけを見る。付けないとサーバが1件ずつDriveを走査する
+    //（50件並ぶ画面なので、開いただけで最大50回の走査になる）。
+    call("getPricingThumbnails", { masterIds: part, cacheOnly: true }).then(function (map) {
+      if (map) {
+        var cs = $("lst-list").querySelectorAll(".card");
+        for (var m = 0; m < cs.length; m++) {
+          var u = map[cs[m].getAttribute("data-id")];
+          var im = cs[m].querySelector(".lst-th");
+          if (u && im && !im.src) im.src = u;
+        }
+      }
+      lstMarkNoThumb(part);
+      lstThumbs(ids, from + 12);
+    }).catch(function (e) {
+      if (isAuthError(e)) return;
+      lstMarkNoThumb(part);
+      lstThumbs(ids, from + 12);
+    });
+  }
+
   function lstRow(r) {
-    return '<div class="card" data-id="' + esc(r.masterId) + '" data-rev="' + esc(r.rev) + '">' +
+    return '<div class="card" data-id="' + esc(r.masterId) + '" data-rev="' + esc(r.rev) +
+      '" data-haspic="' + (r.hasPhoto ? "1" : "0") + '">' +
+      '<div style="display:flex; gap:10px; align-items:flex-start;">' +
+      '<img class="lst-th" alt="" style="width:56px;height:56px;border-radius:10px;' +
+      'object-fit:cover;background:#efe9de;flex:none;">' +
+      '<div style="flex:1; min-width:0;">' +
       "<h2 style=\"font-size:15px;\">" + esc(r.name || r.masterId) + "</h2>" +
-      '<div class="sub" style="margin-bottom:8px;">' + esc(r.masterId) +
+      '<div class="sub">' + esc(r.masterId) +
       (r.place ? "　" + esc(r.place) : "") +
       (r.legal ? '　<span style="color:var(--danger);">法規の確認あり</span>' : "") +
-      "</div>" +
+      "</div></div></div>" +
+      '<div style="height:8px;"></div>' +
       '<div style="display:flex; gap:8px; align-items:flex-end; margin-bottom:8px;">' +
       '<label class="f" style="flex:1; margin:0;"><span>ねだん（円）</span>' +
       '<input type="number" class="lst-price" inputmode="numeric" min="1" value="' +
@@ -960,6 +1159,14 @@
       out.className = "msg lst-r"; out.textContent = "直しています…";
       call("storeChangePrice", { masterId: id, price: p, expectedRev: rev() })
         .then(function (res) {
+          // 🔴【2026-08-01・Codex監査3】正本が変わっていないのに成功と言わない。
+          //   上位者の判断がある品はサーバが proposal:true を返し、値段は書き換えない。
+          if (res && res.proposal) {
+            out.className = "msg lst-r";
+            out.textContent = String(res.message ||
+              "オーナーの判断があるため、仮案としてオーナーへ送りました。");
+            return;
+          }
           out.className = "msg lst-r ok";
           out.textContent = "直しました。オーナーの画面にも出ます。";
           if (res && res.rev != null) c.setAttribute("data-rev", res.rev);
@@ -974,6 +1181,14 @@
       out.className = "msg lst-r"; out.textContent = "変えています…";
       call("storeSetNetCandidate", { masterId: id, on: on, expectedRev: rev() })
         .then(function (res) {
+          // 🔴 同上。正本が変わっていないならボタンの見た目も変えない
+          //    （✓が付いたのに実際は付いていない＝一番たちの悪いズレ）。
+          if (res && res.proposal) {
+            out.className = "msg lst-r";
+            out.textContent = String(res.message ||
+              "オーナーの判断があるため、仮案としてオーナーへ送りました。");
+            return;
+          }
           b.querySelector(".t").textContent = on ? "✓ ネット候補にしている" : "ネット候補にする";
           out.className = "msg lst-r ok";
           out.textContent = on ? "ネット候補にしました。" : "ネット候補から外しました。";
@@ -1006,6 +1221,9 @@
       box.insertAdjacentHTML("beforeend", h);
       var cards = box.querySelectorAll(".card");
       for (var j = cards.length - rows.length; j < cards.length; j++) lstWire(cards[j]);
+      // 🔴 写真は後追いで12点ずつ（Codex監査(3周目)4）。値付け画面と同じ作り。
+      //    途中で失敗しても続きへ進む（1回の失敗で以降が全部空欄にならないように）。
+      lstThumbs(rows.map(function (r) { return r.masterId; }), 0);
       LST.offset += rows.length;
       // 満杯で返ってきたら、まだ先がある
       $("lst-more").style.display = (rows.length >= LST.limit) ? "" : "none";
@@ -1039,9 +1257,9 @@
     ["カテゴリ", "select"],
     ["保管場所", "text"],
     ["店頭価格", "number"],
-    ["実寸サイズ", "text"],
+    ["採寸", "text"],
     ["状態メモ", "textarea"],
-    ["補足メモ", "textarea"]
+    ["補足・訂正メモ(人間)", "textarea"]
   ];
   var CATEGORY_OPTIONS = null;   // 一度取ったら覚える
 
@@ -1098,9 +1316,22 @@
       if (!changed) { m.className = "msg"; m.textContent = "変わっていません。"; return; }
       $("edt-save").disabled = true;
       m.className = "msg"; m.textContent = "保存しています…";
-      call("updateProductFields", { masterId: masterId, patch: patch }).then(function () {
-        m.className = "msg ok";
-        m.textContent = changed + "か所を保存しました。";
+      call("updateProductFields", { masterId: masterId, patch: patch }).then(function (r) {
+        // 🔴【2026-08-01・Codex監査2】**送った件数ではなく、サーバが保存した件数**を出す。
+        //   GASは EDITABLE_FIELDS に無い列を例外にせず黙って捨てる。送信件数を数えて
+        //   「3か所を保存しました。」と出していたので、実際には1つも書かれていなくても
+        //   保存できたように見えた（実際 "実寸サイズ" は存在しない列で、ずっと捨てられていた）。
+        var saved = (r && r.saved) || [];
+        var n = saved.length;
+        m.className = n === changed ? "msg ok" : "msg err";
+        if (n === 0) {
+          m.textContent = "保存されませんでした。もう一度お試しください。";
+        } else if (n < changed) {
+          m.textContent = n + "か所だけ保存しました（" + (changed - n) + "か所は保存できていません）。";
+        } else {
+          m.textContent = n + "か所を保存しました。";
+        }
+        if (r && r.warning) m.textContent += " " + r.warning;
         editOpen(masterId);      // 版数を取り直す
       }).catch(function (e) {
         m.className = "msg err";
@@ -1151,43 +1382,65 @@
   ONSHOW["edit"] = function () { setTimeout(function () { $("edt-input").focus(); }, 60); };
 
   // ---- QRからネット出品 ----------------------------------------------------
+  // 🔴【2026-08-01・Codex監査3】サーバが返すのは
+  //   { blocked, blockReason, warnings[], isLargeItem, alreadyQueued } で、
+  //   eligible も blockers も name も**返らない**。
+  //   ここは el.eligible を見ていたので常に false ＝出せる品でも送信ボタンが出ず、
+  //   「QRからネット出品」が最初から一度も使えなかった。エラーは出ない。
   function netRender(masterId, el) {
-    var ok = !!(el && el.eligible);
-    var reasons = (el && (el.blockers || el.reasons)) || [];
-    if (!Array.isArray(reasons)) reasons = [reasons];
-    var h = '<div class="card"><h2>' + esc((el && el.name) || masterId) + "</h2>" +
-            '<div class="sub" style="margin-bottom:10px;">' + esc(masterId) + "</div>";
-    if (ok) {
-      h += '<div class="msg ok" style="margin-bottom:10px;">ネットに出せます。</div>' +
-           '<button class="btn primary" id="net-add" type="button">' +
-           '<span class="t">出品リストへ送る</span></button>';
-    } else {
+    var blocked = !!(el && el.blocked);
+    var warnings = (el && el.warnings) || [];
+    if (!Array.isArray(warnings)) warnings = [warnings];
+    var h = '<div class="card"><h2>' + esc(masterId) + "</h2>";
+    if (el && el.alreadyQueued) {
+      h += '<div class="msg ok" style="margin-bottom:10px;">この品はもう出品リストに入っています。</div>';
+    }
+    if (blocked) {
       // 🔴 出せない理由を必ず出す。「出せません」だけだと、棚の前で手が止まる。
-      h += '<div class="msg err" style="margin-bottom:6px;">まだ出せません。</div>';
-      if (reasons.length) {
-        h += "<ul style=\"margin:0 0 10px 18px; font-size:14px;\">";
-        for (var i = 0; i < reasons.length; i++) h += "<li>" + esc(reasons[i]) + "</li>";
-        h += "</ul>";
-      } else {
-        h += '<div class="sub" style="margin-bottom:10px;">理由がサーバから返っていません。' +
-             "管理ページで確かめてください。</div>";
-      }
-      h += '<button class="btn" id="net-edit" type="button">' +
+      h += '<div class="msg err" style="margin-bottom:6px;">まだ出せません。</div>' +
+           '<div style="margin-bottom:10px;">' +
+           esc((el && el.blockReason) || "理由がサーバから返っていません。管理ページで確かめてください。") +
+           "</div>" +
+           '<button class="btn" id="net-edit" type="button">' +
            '<span class="t">この品を直しに行く</span></button>';
+    } else {
+      h += '<div class="msg ok" style="margin-bottom:10px;">ネットに出せます。</div>';
+      if (warnings.length) {
+        // 未入力があっても出せる。ただし何が足りないかは見せる（了承して送る形）。
+        h += '<div class="sub" style="margin-bottom:4px;">足りていないもの:</div>' +
+             "<ul style=\"margin:0 0 10px 18px; font-size:14px;\">";
+        for (var i = 0; i < warnings.length; i++) h += "<li>" + esc(warnings[i]) + "</li>";
+        h += "</ul>";
+      }
+      h += '<button class="btn primary" id="net-add" type="button">' +
+           '<span class="t">' + (warnings.length ? "このまま出品リストへ送る" : "出品リストへ送る") +
+           "</span></button>";
+      if (warnings.length) {
+        h += '<button class="btn" id="net-edit" type="button" style="margin-top:8px;">' +
+             '<span class="t">先に直しに行く</span></button>';
+      }
     }
     h += '<button class="btn" id="net-shot" type="button" style="margin-top:8px;">' +
          '<span class="t">ぐるっと撮る（ターンテーブル）</span></button>' +
          '<div class="msg" id="net-r"></div></div>';
     $("net-detail").innerHTML = h;
 
+    var ok = !blocked;
     if (ok) {
       $("net-add").addEventListener("click", function () {
         var r = $("net-r");
         $("net-add").disabled = true;
         r.className = "msg"; r.textContent = "送っています…";
-        call("addToNetListingQueue", { masterId: masterId }).then(function () {
+        // 🔴 未入力があるときサーバは {ok:false, needsAcknowledge:true} を返す。
+        //   了承したうえで送る形にしないと、画面に理由も出ないまま失敗し続ける。
+        call("addToNetListingQueue", {
+          masterId: masterId,
+          acknowledgeWarnings: warnings.length > 0
+        }).then(function (res) {
           r.className = "msg ok";
-          r.textContent = "出品リストへ送りました。出す／出さないはPC版で決めます。";
+          r.textContent = (res && res.alreadyQueued)
+            ? "この品はもう出品リストに入っています。"
+            : "出品リストへ送りました。出す／出さないはPC版で決めます。";
         }).catch(function (e) {
           $("net-add").disabled = false;
           r.className = "msg err"; r.textContent = e.message;
@@ -1228,6 +1481,50 @@
   $("net-input").addEventListener("keydown", function (e) {
     if (e.key === "Enter") { e.preventDefault(); netGo(); }
   });
+  // ==========================================================================
+  // 出品リスト（見るだけ）
+  // 🔴 決めるのはPC版。ここで「出す／出さない」を押せるようにしない
+  //    （判断の位が owner_pc より下になり、あとから走った方が勝つ形になる）。
+  // ==========================================================================
+  function loadQueue() {
+    var msg = $("q-msg"), box = $("q-list");
+    msg.className = "msg"; msg.textContent = "読み込んでいます…"; box.innerHTML = "";
+    // 🔴 スマホは軽い方を呼ぶ（Codex監査6）。重い方はPC版が使う。
+    call("getNetListingQueueLite", {}).then(function (rows) {
+      rows = Array.isArray(rows) ? rows : [];
+      if (!rows.length) {
+        msg.className = "msg";
+        msg.textContent = "まだ何も送られていません。";
+        return;
+      }
+      msg.textContent = "";
+      var h = "";
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
+        var th = r.photo || "";
+        h += '<div class="card"><div style="display:flex; gap:10px; align-items:flex-start;">' +
+             (th ? '<img src="' + esc(th) + '" alt="" style="width:64px;height:64px;border-radius:10px;' +
+                   'object-fit:cover;background:#efe9de;flex:none;">' : "") +
+             '<div style="flex:1; min-width:0;">' +
+             "<h2 style=\"font-size:15px;\">" + esc(r.name || r.masterId) + "</h2>" +
+             '<div class="sub">' + esc(r.masterId) + "　" + esc(r.status || "候補") + "</div>" +
+             '<div class="sub">' +
+             (r.confirmedPrice ? "確定 " + esc(yen(r.confirmedPrice))
+                               : (r.storePrice !== "" ? "店頭 " + esc(yen(r.storePrice)) : "値段まだ")) +
+             "</div>" +
+             (r.listedAnywhere ? '<div class="msg ok" style="font-size:13px;">もう出品済みです</div>' : "") +
+             (r.masterNotFound ? '<div class="msg err" style="font-size:13px;">商品マスタに見つかりません</div>' : "") +
+             "</div></div></div>";
+      }
+      box.innerHTML = h;
+    }).catch(function (e) {
+      // 🔴 読めなかったことを「0件」と混ぜない
+      msg.className = "msg err";
+      msg.textContent = "出品リストが読めていません（0件ではありません）。" + e.message;
+    });
+  }
+  ONSHOW["queue"] = loadQueue;
+
   ONSHOW["netlist"] = function () { setTimeout(function () { $("net-input").focus(); }, 60); };
 
   function start() {
