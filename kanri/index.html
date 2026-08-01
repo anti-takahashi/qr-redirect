@@ -1336,8 +1336,15 @@
       //   ずれていたので、既存メモは常に空欄に見え、保存すると必ず拒否されていた
       //   （STORE_EDITABLE_FIELDS が正しい列名しか受け付けないため）。
       var memo = d["補足・訂正メモ(人間)"] || "";
+      // 🔴【2026-08-01・オーナー実機「商品開いて画像がないと何かわからなくなります」】
+      //   写真を出す。この画面は**現物を手に持って開く**ので、写真が無いと
+      //   「いま持っているものと同じ品か」を確かめられない（骨董は似た名前が並ぶ）。
+      //   ⚠️ サーバの詳細は写真を返さない（Driveを見に行くと1件ごとに待たされるため）。
+      //      一覧と同じ**画像キャッシュ**から後追いで入れる。
       box.innerHTML =
         '<div class="card">' +
+        '<img id="sch-th" alt="" style="display:none; width:100%; max-height:280px;' +
+        'object-fit:contain; border-radius:12px; background:#efe9de; margin-bottom:12px;">' +
         "<h2>" + esc(d["商品名"] || masterId) + "</h2>" +
         '<div class="sub" style="margin-bottom:10px;">' + esc(masterId) +
         "　" + (d["店頭価格"] === "" || d["店頭価格"] == null ? "値段まだ" : yen(d["店頭価格"])) +
@@ -1347,6 +1354,37 @@
         //   今回の意図がJSONまでで止まっていた（返しただけでは誰も見られない）。
         (d["保管場所"] ? '<div class="sub" style="margin-bottom:10px;">置き場所: ' +
           esc(d["保管場所"]) + "</div>" : "") +
+        (d["採寸"] ? '<div class="sub" style="margin-bottom:10px;">採寸: ' +
+          esc(d["採寸"]) + "</div>" : "") +
+        // 🔴【2026-08-01・オーナー実機「説明文ないと補足追加しづらい」】
+        //   補足は**説明を読んで、足りないところを書き足す**もの。元が見えないと書けない。
+        //   ⚠️ 長いので折りたたむ（開いた瞬間に補足欄が画面外へ行かないように）。
+        // 🔴 「サーバがそもそも返していない」と「本当に説明が無い」は**別**。
+        //   返していないのに「まだ説明はありません」と出すと、画面が嘘をつく。
+        //   （2026-08-01: GASの版が上限200に達してデプロイできず、この差が実際に出た）
+        //   キーが無い＝分からない → 何も出さない。キーがあって空＝本当に無い → そう言う。
+        (!Object.prototype.hasOwnProperty.call(d, "概要(商品説明)")
+          ? ""
+          : (d["概要(商品説明)"]
+            ? '<details style="margin-bottom:12px;"><summary style="cursor:pointer;' +
+              'min-height:44px; display:flex; align-items:center; font-weight:700;">' +
+              "いまの説明を読む</summary>" +
+              '<div class="sub" style="margin-top:8px; white-space:pre-wrap;">' +
+              esc(d["概要(商品説明)"]) + "</div></details>"
+            : '<div class="sub" style="margin-bottom:12px;">まだ説明はありません。</div>')) +
+        // 🔴【2026-08-01・オーナー実機「詳細から価格も変えれるように。一緒に変えたい時見失います」】
+        //   補足を書きながら値段も直したい場面がある（現物を見て気づく）。
+        //   一覧へ戻って探し直すと、どれだったか見失う。
+        //   ⚠️ 一覧と**同じ口**（storeChangePrice）を使う。別の口を作らない。
+        //      版数（更新バージョン）も一緒に送る＝古い内容で上書きしない。
+        '<div style="display:flex; gap:8px; align-items:flex-end; margin-bottom:12px;">' +
+        '<label class="f" style="flex:1; margin:0;"><span>値段（円）</span>' +
+        '<input type="number" id="sch-price" inputmode="numeric" min="1" value="' +
+        (d["店頭価格"] === "" || d["店頭価格"] == null ? "" : esc(d["店頭価格"])) + '"></label>' +
+        '<button type="button" class="btn primary" id="sch-price-save" ' +
+        'style="width:auto; min-width:104px; margin:0;"><span class="t">直す</span></button>' +
+        "</div>" +
+        '<div class="msg" id="sch-price-msg"></div>' +
         '<label class="f"><span>補足（気づいたことを足していく）</span>' +
         '<textarea id="sch-memo" rows="5" style="width:100%;min-height:120px;padding:10px 12px;' +
         'border:1px solid var(--line);border-radius:12px;font:inherit;background:#fff;' +
@@ -1354,6 +1392,56 @@
         '<button class="btn primary" id="sch-save" type="button"><span class="t">補足を保存する</span></button>' +
         '<div class="msg" id="sch-save-msg"></div>' +
         "</div>";
+      // 写真を後追いで入れる（本文の表示を待たせない）
+      // 🔴 まず画像キャッシュ（安い）。無ければ**この1点だけ**Driveを見る。
+      //    一覧では50件ぶんになるので絶対にやらないが、開いた1点なら待てる範囲。
+      //    ⚠️ 世代が変わっていたら入れない（別の品を開いたあとに前の写真が出ないように）。
+      (function (mid, mySeq) {
+        var put = function (url) {
+          if (isStale("sch", mySeq)) return false;
+          var im = document.getElementById("sch-th");
+          if (!im || !url) return false;
+          im.onload = function () { im.style.display = ""; };
+          im.onerror = function () { im.style.display = "none"; };
+          im.src = url;
+          return true;
+        };
+        call("getPricingThumbnails", { masterIds: [mid], cacheOnly: true }).then(function (map) {
+          if (put(map && map[mid])) return;
+          if (isStale("sch", mySeq)) return;
+          return call("getPricingThumbnails", { masterIds: [mid] }).then(function (m2) {
+            put(m2 && m2[mid]);
+          });
+        }).catch(function () { /* 写真が出なくても補足は書ける（行き止まりにしない） */ });
+      })(masterId, seq);
+
+      // 値段を直す。🔴 版数はこのカードが持っているものを使い、成功したら**取り直す**
+      //   （取り直さないと、続けて補足を保存したときに必ず版数不一致で拒否される）。
+      $("sch-price-save").addEventListener("click", function () {
+        var pm = $("sch-price-msg");
+        var p = Number($("sch-price").value || 0);
+        if (!p || p < 1) { pm.className = "msg err"; pm.textContent = "値段を入れてください。"; return; }
+        var pb = $("sch-price-save");
+        pb.disabled = true;
+        pm.className = "msg"; pm.textContent = "直しています…";
+        call("storeChangePrice", { masterId: masterId, price: p, expectedRev: rev })
+          .then(function (res) {
+            // 🔴 正本が変わっていないのに成功と言わない（一覧と同じ扱い）。
+            //   上位者の判断がある品はサーバが proposal:true を返し、値段は書き換えない。
+            if (res && res.proposal) {
+              pm.className = "msg";
+              pm.textContent = String(res.message ||
+                "オーナーの判断があるため、仮案としてオーナーへ送りました。");
+              return;
+            }
+            pm.className = "msg ok";
+            pm.textContent = "直しました。オーナーの画面にも出ます。";
+            if (res && res.rev != null) rev = res.rev;   // 補足の保存が拒否されないように
+          }).catch(function (e) {
+            pm.className = "msg err"; pm.textContent = e.message;
+          }).finally(function () { pb.disabled = false; });
+      });
+
       if (typeof after === "function") after();
       $("sch-save").addEventListener("click", function () {
         var m = $("sch-save-msg");
