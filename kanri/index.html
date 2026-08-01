@@ -269,6 +269,26 @@
       <div class="msg" id="sale-msg"></div>
     </div>
 
+    <!-- 🔴【2026-08-01・オーナー要望】QRの無い品を手で入れる。
+         入れるのは**商品名と値段だけ**（それ以上聞かない＝レジで手が止まる）。
+         ⚠️ 商品マスタには登録しない。売上にだけ載る（在庫を持たない品なので）。
+         ⚠️ かごの中でも今日の売上でも「手入力」と分かるようにする
+            （あとで見た人が「QRを貼り忘れた品」と区別できるように）。 -->
+    <details class="card" id="sale-manual-card">
+      <summary style="font-weight:700; cursor:pointer; min-height:44px; display:flex; align-items:center;">
+        QRのない商品を手で入れる
+      </summary>
+      <div style="margin-top:12px;">
+        <label class="f"><span>商品名</span>
+          <input type="text" id="sale-mname" autocomplete="off" placeholder="小物 など"></label>
+        <label class="f"><span>値段（円）</span>
+          <input type="number" id="sale-mprice" inputmode="numeric" min="1" placeholder="0"></label>
+        <button class="btn primary" id="sale-madd" type="button">
+          <span class="t">手入力でかごに入れる</span></button>
+        <div class="msg" id="sale-mmsg"></div>
+      </div>
+    </details>
+
     <div class="card" id="sale-cart-card" style="display:none;">
       <h2>かご <span id="sale-count" class="sub"></span></h2>
       <div id="sale-cart"></div>
@@ -957,6 +977,29 @@
     return Math.min(v, saleSubtotal());
   }
 
+  // 🔴【2026-08-01・オーナー要望】QRの無い品を手でかごに入れる。
+  //   聞くのは商品名と値段だけ。サーバは商品マスタを一切触らない（在庫を持たない品）。
+  //   ⚠️ 同じ名前・同じ値段を2つ入れることは**普通に起きる**（同じ小物を2個売る）ので、
+  //      重複として消さない。かごの中でも1点ずつ数える。
+  $("sale-madd").addEventListener("click", function () {
+    var m = $("sale-mmsg");
+    var nm = String($("sale-mname").value || "").trim();
+    var pr = Math.round(Number($("sale-mprice").value || 0));
+    if (!nm) { m.className = "msg err"; m.textContent = "商品名を入れてください。"; return; }
+    if (nm.length > 120) { m.className = "msg err"; m.textContent = "商品名が長すぎます（120文字まで）。"; return; }
+    if (!(pr > 0)) { m.className = "msg err"; m.textContent = "値段を入れてください。"; return; }
+    cart.push({ manual: true, masterId: "", name: nm, listPrice: pr, image: "" });
+    $("sale-mname").value = "";
+    $("sale-mprice").value = "";
+    m.className = "msg ok";
+    m.textContent = "入れました: " + nm + "（" + yen(pr) + "）";
+    renderCart();
+    $("sale-mname").focus();
+  });
+  $("sale-mprice").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); $("sale-madd").click(); }
+  });
+
   function renderCart() {
     var box = $("sale-cart");
     $("sale-cart-card").style.display = cart.length ? "" : "none";
@@ -972,7 +1015,11 @@
            '<div style="flex:1; min-width:0;">' +
            '<div style="font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' +
            esc(it.name || it.masterId) + "</div>" +
-           '<div class="sub" style="font-size:12px;">' + esc(it.masterId) + "　" + yen(it.listPrice) + "</div>" +
+           '<div class="sub" style="font-size:12px;">' +
+           (it.manual
+             ? '<span style="display:inline-block; padding:1px 7px; border-radius:999px;' +
+               ' background:var(--accent); color:#fff; font-weight:700;">手入力</span>'
+             : esc(it.masterId)) + "　" + yen(it.listPrice) + "</div>" +
            "</div>" +
            '<button type="button" class="sale-del" data-i="' + i + '" ' +
            'style="min-width:44px;min-height:44px;border:0;background:transparent;' +
@@ -1096,7 +1143,10 @@
     $("sale-go").disabled = true;
     res.className = "msg"; res.textContent = "登録しています…";
     call("createSale", {
-      cart: cart.map(function (x) { return x.masterId; }),
+      // 手入力は {manual, name, price}、QRのある品はIDの文字列。サーバが見分ける
+      cart: cart.map(function (x) {
+        return x.manual ? { manual: true, name: x.name, price: x.listPrice } : x.masterId;
+      }),
       name: "", date: "",
       operationId: saleOpId,
       // 値引きはサーバが計算し直す。こちらは「何を指定したか」を渡すだけ。
@@ -1132,11 +1182,17 @@
         var r = rows[i];
         h += '<div style="display:flex; align-items:center; gap:8px; padding:7px 0;' +
              ' border-bottom:1px solid var(--line);">' +
-             '<div class="tap-open" role="button" tabindex="0" ' +
-             'style="flex:1; min-width:0; font-size:14px; overflow:hidden; cursor:pointer;' +
-             ' text-overflow:ellipsis; white-space:nowrap; color:var(--accent);' +
-             ' text-decoration:underline; text-underline-offset:3px;">' +
-             esc(r.name || r.masterId) + "</div>" +
+             (r.manual
+               ? '<div style="flex:1; min-width:0; font-size:14px; overflow:hidden;' +
+                 ' text-overflow:ellipsis; white-space:nowrap;">'
+               : '<div class="tap-open" role="button" tabindex="0" ' +
+                 'style="flex:1; min-width:0; font-size:14px; overflow:hidden; cursor:pointer;' +
+                 ' text-overflow:ellipsis; white-space:nowrap; color:var(--accent);' +
+                 ' text-decoration:underline; text-underline-offset:3px;">') +
+             esc(r.name || r.masterId) +
+             (r.manual ? ' <span style="display:inline-block; padding:1px 7px; border-radius:999px;' +
+                         ' background:var(--accent); color:#fff; font-size:11px; font-weight:700;">手入力</span>' : "") +
+             "</div>" +
              '<div class="sub" style="font-size:12px; white-space:nowrap;">' + yen(r.saleValue) + "</div>" +
              '<button type="button" class="sale-undo" data-id="' + esc(r.masterId) + '" ' +
              'data-sale="' + esc(r.saleId || "") + '" ' +
