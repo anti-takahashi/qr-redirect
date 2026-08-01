@@ -1,0 +1,1052 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>会員カタログ｜アンティーク家具たかはし</title>
+
+<!-- 🔴【2026-08-01】ここは**自社ドメイン**なので、外側の <head> が自分のものになる。
+     GASが画面を返していたときは外側がGoogleのもので、
+       ・ホーム画面のアイコンと名前が届かない ・Googleの注意表示が出る
+       ・複数アカウントの端末で /macros/u/1/s/… へ書き換わって404
+       ・実測 240KB / 1.6秒（自社ドメインの静的ページは 38KB / 0.23秒）
+     が起きていた。 -->
+<link rel="apple-touch-icon" href="../icon-catalog-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="../icon-catalog-192.png">
+<meta name="apple-mobile-web-app-title" content="カタログ">
+<meta name="application-name" content="カタログ">
+<meta name="theme-color" content="#faf7f2">
+<!-- 会員だけの画面。検索には出さない -->
+<meta name="robots" content="noindex, nofollow">
+<!-- 🔴 manifest は付けない。付けるとiOSが**web appとして起動**し、
+     ①開くURLが start_url に置き換わる ②localStorage が Safari と別領域になる。
+     2026-07-31に実機で踏んだ（ホーム画面から開くとログインが消えた）。 -->
+
+<style>
+  :root {
+    --bg: #faf7f2; --fg: #2f2b26; --accent: #7c6a4f;
+    --muted: #6b6255; --line: #e3dcd0; --card: #fff;
+    --ok: #2f7a4d; --danger: #c0392b; --line-green: #06c755;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
+  body {
+    font: 15px/1.8 "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  header {
+    position: sticky; top: 0; z-index: 10; background: var(--bg);
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 10px;
+    padding: calc(10px + env(safe-area-inset-top)) 14px 10px 14px;
+  }
+  #back {
+    display: none; align-items: center; justify-content: center;
+    min-width: 44px; min-height: 44px; margin-left: -8px;
+    border: 0; background: transparent; color: var(--fg); font-size: 22px; cursor: pointer;
+  }
+  #here { font-size: 17px; font-weight: 700; flex: 1; }
+
+  main { padding: 14px; max-width: 760px; margin: 0 auto; }
+  .view { display: none; }
+  .view.on { display: block; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 16px; margin-bottom: 12px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: .04em; }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  p { margin: 0 0 10px; }
+  .sub { font-size: 13px; color: var(--muted); }
+  .msg { font-size: 14px; margin-top: 10px; min-height: 1.6em; }
+  .msg.err { color: var(--danger); font-weight: 700; }
+  .msg.ok { color: var(--ok); font-weight: 700; }
+
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    width: 100%; min-height: 56px; padding: 12px 16px; margin-bottom: 10px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    font: inherit; font-weight: 700; color: var(--fg); cursor: pointer;
+    text-decoration: none;
+  }
+  .btn.line { background: var(--line-green); color: #fff; border-color: var(--line-green); }
+  .btn:active { opacity: .85; }
+
+  /* 一覧: 2列。写真が主役なので文字は控えめに */
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .item {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    overflow: hidden; cursor: pointer; position: relative;
+  }
+  .item img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block; background: #efe9de; }
+  .item .b { padding: 9px 10px 11px; }
+  .item .n { font-size: 13px; line-height: 1.55; max-height: 4.7em; overflow: hidden; }
+  .item .p { font-size: 15px; font-weight: 700; margin-top: 5px; }
+  /* お気に入りは**押せる大きさ**にする（指で押す・44px以上） */
+  .fav {
+    position: absolute; top: 6px; right: 6px;
+    width: 44px; height: 44px; border: 0; border-radius: 50%;
+    background: rgba(255,255,255,.92); cursor: pointer;
+    font-size: 20px; line-height: 1; color: #b9b1a4;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .fav.on { color: #e0245e; }
+
+  .filters { display: flex; gap: 8px; margin-bottom: 12px; }
+  .input, select.input {
+    width: 100%; min-height: 48px; padding: 9px 12px;
+    border: 1px solid var(--line); border-radius: 12px;
+    font: inherit; background: #fff; color: var(--fg);
+  }
+
+  #busy {
+    position: fixed; left: 0; right: 0; top: 0; height: 3px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    background-size: 40% 100%; background-repeat: no-repeat;
+    animation: sl 1.1s linear infinite; display: none; z-index: 20;
+  }
+  @keyframes sl { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+
+  .detail img { width: 100%; border-radius: 12px; margin-bottom: 12px; background: #efe9de; }
+  .price { font-size: clamp(24px, 8vw, 34px); font-weight: 700; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div id="busy"></div>
+
+<header>
+  <button id="back" type="button" aria-label="ひとつ戻る">←</button>
+  <div id="here">会員カタログ</div>
+</header>
+
+<main>
+  <!-- ① まだログインしていない -->
+  <section class="view" id="v-gate">
+    <div class="card" style="text-align:center;">
+      <h1>アンティーク家具たかはし</h1>
+      <p class="sub" style="margin-bottom:16px;">LINE会員限定カタログ</p>
+      <p>公式LINEでログインすると、店頭の品をご覧いただけます。<br>
+        気になるものは<b>お気に入り</b>に入れておけます。</p>
+      <a class="btn line" id="login" href="#">公式LINEでログイン</a>
+      <p class="sub" style="margin:12px 0 0;">
+        <a class="privacy-link" href="#" style="color:var(--muted);">プライバシーポリシー</a>
+      </p>
+      <div class="msg" id="gate-msg"></div>
+    </div>
+  </section>
+
+  <!-- ② 一覧 -->
+  <section class="view" id="v-list">
+    <div class="filters">
+      <select class="input" id="cat" style="width:44%;"><option value="">すべて</option></select>
+      <input class="input" id="q" type="search" placeholder="さがす（品名・説明）" style="flex:1;">
+    </div>
+    <!-- 🔴【2026-08-01・Codex監査7】♥を付けても「それだけ見る」方法が無かった。
+         再来店したときに前に見た品を探すのが、お気に入りの主な使いどころ。
+         IDは手元にあるので通信は増えない。 -->
+    <button class="btn" id="favonly" type="button"
+            style="min-height:48px; margin-bottom:12px; font-size:14px;">
+      ♡ お気に入りだけ見る
+    </button>
+    <div class="msg" id="list-msg">読み込んでいます…</div>
+    <div class="grid" id="grid"></div>
+    <button class="btn" id="more" type="button" style="display:none; margin-top:12px;">もっと見る</button>
+  </section>
+
+  <!-- 好みアンケート（LINE会員・初回1回だけ）
+       🔴【2026-08-01・Codex監査3】旧カタログにあって新画面に無かった＝移行漏れ。
+          このまま本番へ移すと、新しい会員の回答が1件も増えなくなる。
+          別画面にはしない（一覧を見に来た人の邪魔をしない・「あとで」で必ず閉じられる）。 -->
+  <section class="view" id="v-survey">
+    <div class="card">
+      <h2>お探しのものを教えてください（任意）</h2>
+      <p class="sub">公式LINEのアカウントと結び付けて保存し、お客様に合った品が入ったときの
+        ご案内に使います。いつでも公式LINEからご連絡いただければ削除します。
+        答えなくても会員カタログは通常どおりご利用いただけます。<br>
+        <a class="privacy-link" href="#" style="color:var(--muted);">プライバシーポリシー</a></p>
+
+      <div style="margin-top:14px;font-weight:700;">お探しのもの（いくつでも）</div>
+      <div id="sv-looking" style="margin:6px 0 14px;"></div>
+
+      <label class="f"><span style="font-weight:700;">ご予算の目安</span>
+        <select class="input" id="sv-budget"></select></label>
+      <label class="f" style="margin-top:10px;"><span style="font-weight:700;">年齢帯</span>
+        <select class="input" id="sv-age"></select></label>
+      <label class="f" style="margin-top:10px;"><span style="font-weight:700;">性別</span>
+        <select class="input" id="sv-gender"></select></label>
+
+      <button class="btn line" id="sv-send" type="button" style="margin-top:16px;">送信する</button>
+      <!-- 🔴【Codex監査(2周目)6】「あとで」と書いていたが、押すとサーバに回答済み印が付き
+           **二度と聞かれない**。実態に合う言葉にする（後から聞き直す仕組みは持たない）。 -->
+      <button class="btn" id="sv-skip" type="button">今回は答えない</button>
+      <div class="msg" id="sv-msg"></div>
+    </div>
+  </section>
+
+  <!-- ③ 1点の詳細 -->
+  <section class="view" id="v-detail">
+    <div id="detail"></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  // ==========================================================================
+  // 会員カタログ（C構成）— 2026-08-01
+  //
+  // 画面はここ（自社ドメイン）。GASはJSONを返すだけ。
+  // 🔴 素の fetch で足りる: GASの doPost（ContentService）は
+  //    **Access-Control-Allow-Origin: * を返す**（2026-08-01 実測）。
+  //    doGet（HTMLのページ）には付かないので、そちらを測って「不可能」と誤断していた。
+  //
+  // 🔴 ログインはLINE。GASの ?action=lineLoginStart へ行き、
+  //    戻り先は buildLoginReturnUrl_ がこのページを指す（2026-08-01に変更）。
+  //    ⚠️ 印刷QR（?t=）から入った人はGASのままにしてある。
+  //       ラベルの着地点は変えられないので、そちらの道は触らない。
+  // ==========================================================================
+
+  var API = "https://script.google.com/macros/s/" +
+    "AKfycbxAOpYw6XwevYwLFEahsEvKJfqkxnACdrtpsWaWSFqWR-ltooiVGfLMBwJe6bABSJN1/exec";
+
+  // 🔴【2026-08-01・Fable5監査(2周目)4】プライバシーポリシーは `../privacy.html` を
+  //   指していたが、**そのファイルはどこにも無い**（自社ドメインにも置いていない）。
+  //   個人情報を集める画面の真下のリンクが404だった。旧カタログと同じく
+  //   GASの `?view=privacy`（ログイン不要・静的）を使う。
+  //   APIは端末ごとに差し替えうるので、静的に書かず起動時に差す。
+  (function () {
+    var els = document.querySelectorAll("a.privacy-link");
+    for (var i = 0; i < els.length; i++) {
+      els[i].href = API + "?view=privacy";
+      els[i].target = "_blank";
+      els[i].rel = "noopener";
+    }
+  })();
+
+  var K_SES = "takahashi-members-session";
+  var SESSION = "";
+  var PAGE = { limit: 24, keyword: "", category: "", rows: [] };
+  // お気に入りの印。listFavorites を**1回**呼んで作る（1件ずつ聞くと点数ぶん通信する）。
+  // 🔴 サーバの一覧・詳細は favorited を返さない。ここが唯一の拠り所なので、
+  //    押した結果は必ずここへ書き戻す（描き直しで消えないように）。
+  var FAVS = {};
+  // 手で押した分。初期取得の応答より必ず新しいので、こちらを優先する。
+  var FAV_TOUCHED = {};
+  // 初期取得が終わったか。終わる前に開いた詳細は「まだ分からない」ので、
+  // 押せるが「入っています」とは言い切らない（嘘の状態を見せない）。
+  var FAVS_READY = false;
+  var FAVS_P = null;   // 初期取得の約束。押した時にまだ返っていなければ、これを待つ
+
+  // 🔴【2026-08-01・Codex監査(2周目)2】お気に入りは「入れる／外す」ではなく
+  //   **今の状態を反転する**API。初期取得が返る前は FAVS が空なので、
+  //   既にお気に入りの品も未登録に見える。その状態で押すと、
+  //   客は「入れる」つもりでもサーバでは**外れる**。
+  //   → 押した気持ち（入れたい／外したい）を先に決め、状態が分かってから必要な時だけ反転する。
+  //   ⚠️ ボタンを無効にして待たせる方法は採らない（店内で待たされる方が困る）。
+  var FAVS_FAILED = false;   // 一覧の取得に失敗した＝**状態が分からない**（0件ではない）
+  var FAV_Q = {};            // 品ごとの順番待ち。同じ品への操作を重ねない
+  var FAV_UNKNOWN = {};      // 結果が分からないまま終わった品（次に押されたら聞き直す）
+
+  // 今この品がお気に入りかを**確かめてから**返す。
+  // 🔴【2026-08-01・Codex監査(4周目)1】以前は取得に失敗しても FAVS_READY=true にしていた。
+  //   空の FAVS が「正しい現在の状態」として使われ、実際は入っている品も未登録に見え、
+  //   押すと**外れた**（反転APIなので向きを間違える）。「印が付かないだけ」は嘘だった。
+  function knowFav(id) {
+    // 🔴【Codex監査(5周目)1】前回この品の操作が**結果不明で終わった**なら、
+    //   手元の値を信じない。サーバでは反映されたのに応答だけ届かないことがあり
+    //   （店内の電波切れ）、そのまま押し直すと**反転APIがもう一度動いて元へ戻る**。
+    //   ＝入れたはずが消える。押した人には理由が分からない。
+    if (!FAV_UNKNOWN[id] && FAVS_READY) return Promise.resolve(FAVS[id] === true);
+    if (!FAV_UNKNOWN[id] && FAVS_P && !FAVS_FAILED) {
+      return FAVS_P.then(function () { return knowFav(id); });
+    }
+    // 分からない。この品だけサーバに聞く（全件取り直すより軽い）
+    return call("isFavorited", { masterId: id })
+      .then(function (r) { delete FAV_UNKNOWN[id]; return !!(r && r.favorited); })
+      .catch(function (e) {
+        // 🔴【Codex監査(5周目)4】認証エラーまで握りつぶさない。
+        //   全部 null にしていたので、セッション切れでも「電波の良い所で」と
+        //   **間違った案内**が出て、壊れたセッションも残ったままだった。
+        if (isAuthError(e)) throw e;
+        return null;   // それでも分からない
+      });
+  }
+
+  // 🔴【Codex監査(4周目)3】同じ品への操作を**直列にする**。
+  //   FAVS の更新は通信の後なので、応答前にもう一度押すと両方が古い状態を読み、
+  //   反転APIを2回呼んで元に戻る（一覧の♥を押した直後に詳細を開いて押す等）。
+  function setFav(masterId, want) {
+    var id = String(masterId);
+    var prev = FAV_Q[id] || Promise.resolve();
+    var p = prev.catch(function () {}).then(function () {
+      return knowFav(id);
+    }).then(function (cur) {
+      if (cur === null) {
+        throw new Error("いまの状態を確かめられませんでした。電波の良い所でもう一度お試しください。");
+      }
+      if (cur === want) return want;   // もうその状態＝呼ばない
+      return call("toggleFavorite", { masterId: id }).then(function (res) {
+        delete FAV_UNKNOWN[id];
+        return !!(res && res.favorited);
+      }).catch(function (e) {
+        // 🔴 サーバで反映されたのに応答だけ落ちた可能性がある。手元の値を信じない。
+        FAV_UNKNOWN[id] = true;
+        throw e;
+      });
+    }).then(function (on) {
+      FAVS[id] = on;
+      FAV_TOUCHED[id] = on;
+      return on;
+    });
+    FAV_Q[id] = p;
+    return p;
+  }
+
+  // 🔴【Codex監査(4周目)2】お気に入りが変わった後の一覧の面倒を**1か所**で見る。
+  //   以前は一覧の♥にだけ書いていたので、詳細で外して戻るとカードが残った
+  //   （FAVSは外れているのに、一覧のDOMは作り直されない）。
+  function afterFavChange() {
+    // 🔴【Codex監査(5周目)3】絞り込み中でないときは**何もしていなかった**。
+    //   詳細で入れて一覧へ戻ると♡のまま、外しても♥のまま＝保存できているのに
+    //   「押しても反映されなかった」ように見える。
+    if (FAV_ONLY) applyFilter();
+    else repaintFavs();
+  }
+
+  function $(id) { return document.getElementById(id); }
+  function qs(n) {
+    var m = new RegExp("[?&]" + n + "=([^&]*)").exec(location.search);
+    return m ? decodeURIComponent(m[1].replace(/\+/g, " ")) : "";
+  }
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function yen(n) {
+    if (n == null || n === "" || isNaN(n)) return "";
+    return "¥" + Number(n).toLocaleString("ja-JP");
+  }
+
+  // ---- 画面（移動しない） --------------------------------------------------
+  var TITLE = { gate: "会員カタログ", list: "会員カタログ", detail: "商品", survey: "お探しのもの" };
+  var stack = [];
+  function show(name, push) {
+    var all = document.querySelectorAll(".view");
+    for (var i = 0; i < all.length; i++) all[i].classList.remove("on");
+    var v = $("v-" + name);
+    if (v) v.classList.add("on");
+    $("here").textContent = TITLE[name] || "会員カタログ";
+    if (push !== false) stack.push(name);
+    $("back").style.display = (stack.length > 1 && name !== "gate") ? "flex" : "none";
+    // 一覧へ戻ったときだけ、見ていた場所へ戻す（それ以外は先頭）
+    if (name === "list" && LIST_SCROLL > 0) {
+      var y = LIST_SCROLL;
+      // 描き終わってから動かす（先に呼ぶと高さが足りず先頭のままになる）
+      requestAnimationFrame(function () { window.scrollTo(0, y); });
+    } else {
+      window.scrollTo(0, 0);
+    }
+  }
+  function go(name) { show(name); pushHistory(); }
+  function pushHistory() {
+    try { history.pushState({ m: stack.length }, ""); } catch (e) { /* 履歴が無い環境 */ }
+  }
+  // 🔴【2026-08-01・Codex監査(2周目)1】ひとつ戻る処理を**関数にする**。
+  //   アンケートの送信後に back() を呼んでいたが、そんな関数はどこにも無かった。
+  //   保存はサーバで成功しているのに then の中で例外が出て catch に落ち、
+  //   客にはエラーが出る＝**記録されていないと思って押し直す**。
+  //   押し直すとサーバは already:true を返し、また同じ所で落ちる（永久に抜けられない）。
+  function back() {
+    if (stack.length <= 1) return;
+    // 詳細から離れたら世代を進める。読み込み中に戻っても、
+    // 後から届いた応答が見えない画面へ描き込まない（logViewも余分に記録しない）。
+    if (stack[stack.length - 1] === "detail") DETAIL_SEQ += 1;
+    stack.pop();
+    show(stack[stack.length - 1], false);
+  }
+  $("back").addEventListener("click", back);
+  // 🔴 端末の戻る（ジェスチャー）も同じ道を通す。最下層では**離脱させない**。
+  window.addEventListener("popstate", function () {
+    // 🔴【Codex監査(2周目)4】写真を拡大しているときは、**拡大だけ閉じる**。
+    //   以前は拡大側にも popstate を付けていたので、1回の戻るで
+    //   「拡大が閉じる」と「詳細→一覧へ戻る」が同時に起きていた。
+    //   ここで先に処理して、画面のスタックは動かさない。
+    if (ZOOM_CLOSE) { ZOOM_CLOSE(); pushHistory(); return; }
+    if (stack.length <= 1) { pushHistory(); return; }
+    // 🔴【Codex監査(4周目)4】ここで stack.pop() を書き写していたので、
+    //   back() の中の「詳細から離れたら世代を進める」が効かなかった。
+    //   端末の戻りで一覧へ帰ったあとに詳細の応答が届き、見ていない品が
+    //   閲覧済みとして記録されていた（画面の戻るボタンでは起きない）。
+    back();
+    pushHistory();
+  });
+  var ZOOM_CLOSE = null;   // 拡大中だけ「閉じる関数」が入る
+
+  // ---- 通信 ----------------------------------------------------------------
+  var busyN = 0;
+  function busy(on) {
+    busyN += on ? 1 : -1;
+    if (busyN < 0) busyN = 0;
+    $("busy").style.display = busyN > 0 ? "block" : "none";
+  }
+  function call(action, data) {
+    var body = { action: action, data: Object.assign({}, data || {}) };
+    if (SESSION) body.data.session = SESSION;
+    busy(true);
+    return fetch(API, {
+      method: "POST", mode: "cors", redirect: "follow",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      if (!r.ok) throw new Error("つながりませんでした（" + r.status + "）");
+      return r.json();
+    }).then(function (res) {
+      if (!res || !res.ok) throw errorFromResponse(res);
+      // 🔴【2026-08-01・Codex指摘】okが**2枚ある**。外側は「doPostが処理を呼べた」、
+      //    内側は「その処理が成立した」。外側だけ見ていたので、会員セッション切れ
+      //    （toggleFavorite等が返す {ok:false, reason:'ログインし直してください。'}）が
+      //    **成功として素通り**していた。♥を押しても静かに戻るだけで、
+      //    「ログインし直して」が客に届かない＝一番相談されにくい壊れ方。
+      //    ⚠️ 内側にokを持たない返り値（配列＝一覧・カテゴリ／null＝該当なし）もあるので、
+      //       「okという名前が実際に付いているとき」だけ見る。
+      var inner = res.result;
+      if (inner && typeof inner === "object" && !Array.isArray(inner)
+          && Object.prototype.hasOwnProperty.call(inner, "ok") && inner.ok === false) {
+        throw errorFromResponse(inner, "できませんでした。もう一度お試しください。");
+      }
+      return inner;
+    }).catch(function (e) {
+      // 🔴 ブラウザの英語をそのまま客に見せない。ただし**握りつぶさない**。
+      var m = String((e && e.message) || e || "");
+      // 🔴【2026-08-01・Fable5監査6】JSONで返らなかったときの英語も日本語へ倒す。
+      //   Googleが過負荷のHTMLを200で返すと `SyntaxError: Unexpected token '<'` が
+      //   そのまま客に出ていた（「ブラウザの英語をそのまま見せない」の唯一の抜け道）。
+      // 🔴【2026-08-01・Fable5監査(2周目)1】ここは `[^ -]`（スペース〜ハイフンの否定）で、
+      //   英語の頭文字が必ず一致してしまい**一度も通っていなかった**（`~` の打ち忘れ）。
+      //   日本語かどうかで分ける必要も無いので、条件を素直にする。
+      //   ⚠️ 画面を先に公開してGASが未反映の期間は、**全部の通信がここへ落ちる**
+      //      （GASがHTMLを200で返す）。そのとき客の画面が英語だらけになる。
+      if (/unexpected token|is not valid json|json parse error|json\.parse/i.test(m)) {
+        throw new Error("いま混み合っているようです。少し時間をおいてもう一度お試しください。");
+      }
+      if (/failed to fetch|networkerror|load failed/i.test(m)) {
+        throw new Error("電波が届いていないようです。つながる場所でもう一度お試しください。");
+      }
+      throw e;
+    }).finally(function () { busy(false); });
+  }
+
+  // ---- ログイン ------------------------------------------------------------
+  // 戻ってきたときは ?session=… が付く。**受け取ったらURLから消す**
+  // （画面写しや共有でセッションが漏れないように。ここはホーム画面へ焼く値ではない）。
+  var fromUrl = qs("session");
+  if (fromUrl) {
+    SESSION = fromUrl;
+    try { localStorage.setItem(K_SES, SESSION); } catch (e) { /* 覚えられなくても今回は動く */ }
+    try { history.replaceState(null, "", location.pathname); } catch (e) {}
+  } else {
+    try { SESSION = localStorage.getItem(K_SES) || ""; } catch (e) { SESSION = ""; }
+  }
+  // 🔴【2026-08-01・Fable5監査(2周目)7】ログインの入口だけGASへの**ページ遷移**が残っていた。
+  //   C構成へ移した理由の一つが「Googleアカウントを複数入れている端末では GAS のURLが
+  //   /macros/u/1/… へ書き換えられて404」。fetch を自社ドメイン化しても、
+  //   **遷移は同じ書き換えを受ける**ので、その端末ではログインできないままだった。
+  //   → 先に doPost で認可URLを受け取り、**LINEへ直接**飛ぶ（GASを一度も踏まない）。
+  //   ⚠️ 取れなかったときは今までどおりGASへ遷移する（動いている道は塞がない）。
+  $("login").href = API + "?action=lineLoginStart";
+  $("login").addEventListener("click", function (ev) {
+    if (ev.defaultPrevented) return;
+    ev.preventDefault();
+    var a = this;
+    a.textContent = "LINEへ移動しています…";
+    call("getLineLoginUrl", { t: qs("t") || "" }).then(function (r) {
+      if (r && r.ok && /^https:\/\/access\.line\.me\//.test(String(r.url || ""))) {
+        location.href = r.url;
+        return;
+      }
+      location.href = a.href;   // 形が違うときは触らない（オープンリダイレクトを作らない）
+    }).catch(function () {
+      location.href = a.href;
+    });
+  });
+
+  var err = qs("err");
+  if (err) {
+    $("gate-msg").className = "msg err";
+    $("gate-msg").textContent = err;
+  }
+
+  // 🔴【2026-08-01・Fable5監査4】logout でも詳細の世代を進める。
+  //   詳細の応答待ちに別の通信がAUTHになって logout すると、
+  //   後から届いた応答が**見えない画面に描かれ、閲覧ログまで記録される**。
+  //   back() では進めていたのに、logout だけ抜けていた（同じ型の残り）。
+  function logout(reason) {
+    DETAIL_SEQ += 1;
+    SESSION = "";
+    try { localStorage.removeItem(K_SES); } catch (e) {}
+    stack = [];
+    go("gate");
+    if (reason) {
+      $("gate-msg").className = "msg err";
+      $("gate-msg").textContent = reason;
+    }
+  }
+
+  // 🔴【2026-08-01・Codex指摘6】再ログインの判定を**日本語の一致でやらない**。
+  //   「セッションが不正です」には「ログイン」の字が無く logout() に入らないので、
+  //   壊れたトークンが端末に残り、再読み込みしても直らなかった。
+  //   サーバが付ける code:'AUTH' を見る。日本語の一致は保険として残す
+  //   （GAS側がまだ古い版でも回復できるように）。
+  // サーバの応答から例外を作る。🔴 印(code:'AUTH')を見るのは**ここだけ**。
+  //   以前は !res.ok で先に throw していた後ろに code の判定を置いていたので、
+  //   **一生実行されない行**だった（文言の一致で偶然回復していただけ）。
+  //   文言は読みやすさのために変わる。判定を文言に依存させない。
+  //   ⚠️ 外側（doPostが返す {error}）と内側（関数が返す {reason}）の**両方**をここで作る。
+  //      以前は内側だけ別の場所で印を付けていて、「1か所」と書いたコメントが嘘だった。
+  function errorFromResponse(res, fallback) {
+    var msg = (res && (res.error || res.reason)) || fallback || "不明なエラー";
+    var e = new Error(String(msg).replace(/^Error:\s*/, ""));
+    if (res && res.code === "AUTH") e.auth = true;
+    return e;
+  }
+
+  function isAuthError(e) {
+    if (e && e.auth) return true;
+    return /ログイン|セッション/.test(String((e && e.message) || ""));
+  }
+
+  // ---- 一覧 ----------------------------------------------------------------
+  // 🔴 サーバが返す**名前そのまま**を読むこと（2026-08-01・Codexの指摘で発覚）。
+  //    ここは it.image / it.thumb / it.thumbnail を読んでいたが、GASが返すのは
+  //    `coverImageUrl` の1つだけ＝**一覧の写真が1枚も出ていなかった**。
+  //    エラーは出ない（undefinedは空文字になるだけ）。写真で見せるカタログなので致命的。
+  //    同じ形で `d.size`（実際は dimensions）・`favorited`（そもそも返らない）も外していた。
+  //    → test_catalog_post_node.js の⑧が、画面が読む名前をGAS側と突き合わせて止める。
+  // 🔴【2026-08-01・Codex指摘4】SOLD・売約済はGASが価格をnullで返すので、
+  //   そのままだと「値段が空欄」にしか見えない＝未値付けや不具合と区別が付かない。
+  //   一点物なので「もう無い」ことが分かるかどうかは客に一番大事な情報。
+  function priceLabel(it) {
+    var st = String(it.stockStatus || "");
+    if (st === "SOLD") return "SOLD";
+    if (st === "売約済") return "売約済";
+    return yen(it.price);
+  }
+
+  function itemHtml(it) {
+    var img = it.coverImageUrl || "";   // 一覧が返す写真はこの1つだけ（images は詳細のみ）
+    var on = FAVS[String(it.masterId)] === true;
+    return '<div class="item" data-id="' + esc(it.masterId) + '">' +
+      (img ? '<img loading="lazy" src="' + esc(img) + '" alt="">' : '<img alt="">') +
+      '<button type="button" class="fav' + (on ? " on" : "") + '" ' +
+      'data-id="' + esc(it.masterId) + '" aria-label="お気に入り">' +
+      (on ? "♥" : "♡") + "</button>" +
+      '<div class="b"><div class="n">' + esc(it.name || "") + "</div>" +
+      '<div class="p">' + esc(priceLabel(it)) + "</div></div></div>";
+  }
+
+  function wireItems(from) {
+    var items = $("grid").querySelectorAll(".item");
+    for (var i = from; i < items.length; i++) {
+      (function (el) {
+        el.addEventListener("click", function (ev) {
+          if (ev.target && ev.target.classList.contains("fav")) return;  // ♥は別扱い
+          openDetail(el.getAttribute("data-id"));
+        });
+        var f = el.querySelector(".fav");
+        if (f) {
+          f.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            f.disabled = true;
+            var mid = f.getAttribute("data-id");
+            // 見えている印の逆が「したいこと」。状態が分かる前に押されても取り違えない。
+            var want = !f.classList.contains("on");
+            setFav(mid, want).then(function (on) {
+              f.classList.toggle("on", on);
+              f.textContent = on ? "♥" : "♡";
+              afterFavChange();
+            }).catch(function (e) {
+              // 🔴 黙って戻さない。押したのに何も起きないのが一番分かりにくい。
+              if (isAuthError(e)) { logout(e.message); return; }
+              window.alert(e.message);
+            }).finally(function () { f.disabled = false; });
+          });
+        }
+      })(items[i]);
+    }
+  }
+
+  // 🔴 ページ送りは**画面側でやる**（2026-08-01・Codexの指摘から発覚）。
+  //    offset/limit を送っていたが、getMembersCatalogList は keyword と category しか見ておらず
+  //    毎回**全件**返していた。つまり「もっと見る」を押すたびに同じ品が丸ごと追加され、
+  //    ボタンも消えなかった（rows.length は常に limit 以上）。エラーは出ない。
+  //    GASが全件返す以上、取得は1回で足りる＝通信も減って速くなる。
+  function renderChunk() {
+    var msg = $("list-msg");
+    var rows = PAGE.rows;
+    var before = $("grid").querySelectorAll(".item").length;
+    var end = Math.min(before + PAGE.limit, rows.length);
+    var h = "";
+    for (var i = before; i < end; i++) h += itemHtml(rows[i]);
+    $("grid").insertAdjacentHTML("beforeend", h);
+    wireItems(before);
+    var shown = end;
+    $("more").style.display = (shown < rows.length) ? "" : "none";
+    $("more").textContent = "もっと見る（残り " + (rows.length - shown) + " 点）";
+    msg.textContent = "";
+  }
+
+  // 🔴【2026-08-01・Codex指摘3】検索・絞り込みで**毎回サーバへ行かない**。
+  //   以前は350msごとに getMembersCatalogList を呼び、そのたびにGASが
+  //   マスタ全体と画像キャッシュを読み直していた。さらに順番を数えていないので、
+  //   「椅子」→「椅子 木」と打つと、遅れて返った「椅子」の結果が後から上書きしうる
+  //   ＝打ち終えた言葉と違うものが並ぶ。
+  //   全件は最初の1回で取れている（GASはもともと全件返す）ので、絞り込みは画面内で足りる。
+  //   ⚠️ 点数が数千に増えたらこの前提は崩れる。そのときはサーバ側のページングから作り直す。
+  var ALL = [];
+
+  var FAV_ONLY = false;
+
+  function applyFilter() {
+    var kw = PAGE.keyword;
+    var cat = PAGE.category;
+    PAGE.rows = ALL.filter(function (it) {
+      if (FAV_ONLY && FAVS[String(it.masterId)] !== true) return false;
+      if (cat && it.category !== cat) return false;
+      if (!kw) return true;
+      var hay = String(it.name || "") + " " + String(it.description || "")
+              + " " + String(it.catalogDescription || "");
+      return hay.indexOf(kw) !== -1;
+    });
+    $("grid").innerHTML = "";
+    var msg = $("list-msg");
+    if (!PAGE.rows.length) {
+      $("more").style.display = "none";
+      msg.className = "msg";
+      if (FAV_ONLY && FAVS_FAILED) { favLoadWarning(); return; }
+      msg.textContent = (kw || cat)
+        ? "見つかりませんでした。ほかの言葉でお試しください。"
+        : "いまご覧いただける品がありません。";
+      return;
+    }
+    renderChunk();
+    favLoadWarning();
+  }
+
+  // 🔴【Codex監査(5周目)2】読めていないことは**件数に関係なく**出す。
+  //   0件のときだけ出していたので、詳細で1件だけ判明していると
+  //   「その1件が全部」に見えた（他のお気に入りは黙って欠ける）。
+  //   「もう一度お試しください」と書いておきながら**やり直す手段が無かった**ので、
+  //   読み直すボタンも付ける。
+  function favLoadWarning() {
+    if (!FAV_ONLY || !FAVS_FAILED) return;
+    var msg = $("list-msg");
+    msg.className = "msg err";
+    msg.innerHTML = "お気に入りを読めていません（これで全部とは限りません）。&nbsp;" +
+      '<button type="button" id="fav-retry" style="min-height:44px;padding:6px 14px;' +
+      'border:1px solid var(--line);border-radius:10px;background:#fff;font:inherit;' +
+      'font-weight:700;cursor:pointer;">読み直す</button>';
+    var rb = $("fav-retry");
+    if (rb) {
+      rb.addEventListener("click", function () {
+        rb.disabled = true;
+        FAVS_FAILED = false;
+        loadFavs().then(function () { applyFilter(); });
+      });
+    }
+  }
+
+  function loadList() {
+    var msg = $("list-msg");
+    ALL = []; PAGE.rows = [];
+    $("grid").innerHTML = "";
+    msg.className = "msg";
+    msg.textContent = "読み込んでいます…";
+    $("more").style.display = "none";
+    return call("getMembersCatalogList", { params: {} }).then(function (res) {
+      var rows = (res && (res.items || res.rows)) || (Array.isArray(res) ? res : []);
+      ALL = rows;
+      fillCategories();
+      applyFilter();
+      return true;   // 一覧が出せた
+    }).catch(function (e) {
+      if (isAuthError(e)) { logout(e.message); return false; }
+      // 🔴 読めなかったことを「0件」と混ぜない
+      // 🔴【2026-08-01・Fable5監査3】案内だけでなく**やり直す手段**を出す。
+      //   お気に入り側には5周目で付けたのに、より致命的な一覧側に無かった
+      //   （同じ保証が及んでいない別経路）。店内で電波が切れると、客は
+      //   ブラウザの再読み込みを自力で探すしかない。
+      msg.className = "msg err";
+      msg.innerHTML = "一覧が読めていません（0件ではありません）。" + esc(e.message) + "&nbsp;" +
+        '<button type="button" id="list-retry" style="min-height:44px;padding:6px 14px;' +
+        'border:1px solid var(--line);border-radius:10px;background:#fff;font:inherit;' +
+        'font-weight:700;cursor:pointer;">読み直す</button>';
+      var lb = $("list-retry");
+      if (lb) lb.addEventListener("click", function () { lb.disabled = true; loadList(); });
+      return false;   // 🔴【2026-08-01・Codex監査(8周目)2】失敗を成功に変えない。
+      //   catch が何も返さないと Promise は成功になり、起動の続き（アンケート）まで進んでいた。
+      //   ・通信やシートの失敗: 品が1点も見えていないのにアンケートが出る
+      //   ・認証の失敗: logout でセッションを空にした直後に、空のまま再通信して また AUTH
+      //   アンケートは「まず品を見てもらってから聞く」ものなので、順番が壊れる。
+    });
+  }
+  $("more").addEventListener("click", renderChunk);
+  $("favonly").addEventListener("click", function () {
+    FAV_ONLY = !FAV_ONLY;
+    $("favonly").textContent = FAV_ONLY ? "♥ お気に入りだけ（もどす）" : "♡ お気に入りだけ見る";
+    $("favonly").style.borderColor = FAV_ONLY ? "#e0245e" : "";
+    LIST_SCROLL = 0;
+    applyFilter();
+  });
+
+  var qTimer = null;
+  $("q").addEventListener("input", function () {
+    clearTimeout(qTimer);
+    // 画面内で絞るだけなので待ち時間は短くてよい（通信しない）
+    qTimer = setTimeout(function () {
+      PAGE.keyword = String($("q").value || "").trim();
+      applyFilter();
+    }, 120);
+  });
+  $("cat").addEventListener("change", function () {
+    PAGE.category = String($("cat").value || "");
+    applyFilter();
+  });
+
+  // 🔴【2026-08-01・Codex監査5】カテゴリ専用の通信をやめ、取った一覧から作る。
+  //   一覧は全件返るので category は既に手元にある。専用RPCはキャッシュが冷えていると
+  //   マスタ全体をもう一度読むので、起動時に同じ読み込みが二重に走っていた。
+  //   同じ写しから作るので、絞り込みの選択肢と並ぶ品の公開状態がずれない。
+  function fillCategories() {
+    var set = {};
+    for (var i = 0; i < ALL.length; i++) {
+      var c = String(ALL[i].category || "");
+      if (c) set[c] = true;
+    }
+    var cats = Object.keys(set).sort();
+    var sel = $("cat");
+    var keep = sel.value;
+    sel.innerHTML = '<option value="">すべて</option>';
+    for (var j = 0; j < cats.length; j++) {
+      var o = document.createElement("option");
+      o.value = cats[j]; o.textContent = cats[j];
+      sel.appendChild(o);
+    }
+    sel.value = keep;
+  }
+
+
+
+  // 来訪者ID。🔴 旧カタログ(catalog.html)と**同じキー**を使う。
+  //    別のキーにすると同じ人が2人として数えられ、来店数が水増しされる。
+  var VISITOR_ID_KEY = "qrcat_visitor_id_v1";
+  function visitorId() {
+    try {
+      var v = localStorage.getItem(VISITOR_ID_KEY);
+      if (v) return v;
+      v = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+        : ("v-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10));
+      localStorage.setItem(VISITOR_ID_KEY, v);
+      return v;
+    } catch (e) { return "anon"; }
+  }
+  function logVisit() {
+    // 🔴【2026-08-01・Fable5監査9】note に new/returning を入れる。
+    //   サーバのログ仕様は「visit＝来訪。補足列に new/returning」で、
+    //   それが**来店客数と再訪の分け方**になる。移行のとき空文字にしていて、
+    //   visit は復活したのに粒度だけ落ちていた（分析が静かに劣化する型）。
+    var known = false;
+    try { known = !!localStorage.getItem(VISITOR_ID_KEY); } catch (e) {}
+    var id = visitorId();   // 無ければここで作られる
+    call("logCatalogEvent", {
+      payload: { visitorId: id, event: "visit", ref: "members",
+                 note: known ? "returning" : "new" }
+    }).catch(function () {});
+  }
+
+  function logView(masterId) {
+    call("logCatalogEvent", {
+      payload: { visitorId: visitorId(), event: "view", ref: String(masterId || ""), note: "" }
+    }).catch(function () { /* 記録できなくても画面は止めない */ });
+  }
+
+  // ---- 1点の詳細 -----------------------------------------------------------
+  // 🔴【2026-08-01・Codex監査4】応答の順番を数える。
+  //   Aを開く→戻る→Bを開く を通信の完了前にやると、遅れて返ったAが**Bの画面に描かれる**。
+  //   検索で同じ形を直したのに、詳細には入れていなかった。
+  //   店内の電波が弱いときや、続けて見比べるときに起きる。
+  var DETAIL_SEQ = 0;
+  var LIST_SCROLL = 0;
+
+  function openDetail(masterId) {
+    // 🔴【2026-08-01・Codex監査6】一覧のどこを見ていたかを覚える。
+    //   戻るたび先頭に飛ぶと、24点ずつ約140点を見る画面では毎回同じ所まで
+    //   スクロールし直すことになる（店内で見比べる使い方と噛み合わない）。
+    LIST_SCROLL = window.pageYOffset || document.documentElement.scrollTop || 0;
+    go("detail");
+    var seq = ++DETAIL_SEQ;
+    $("detail").innerHTML = '<div class="card sub">読み込んでいます…</div>';
+    call("getMembersCatalogDetail", { masterId: masterId }).then(function (d) {
+      if (seq !== DETAIL_SEQ) return;   // もう別の品を開いている
+      if (!d) {
+        $("detail").innerHTML = '<div class="card"><span class="msg err">この品は見つかりませんでした。</span></div>';
+        return;
+      }
+      var imgs = d.images || [];   // 詳細が返すのは images（配列）だけ
+      var h = '<div class="card detail">';
+      // 1枚目だけ通常読込、2枚目以降は遅延（開いた瞬間に全部要求しない）
+      // 🔴【2026-08-01・Codex監査8】写真が主役なのに拡大できなかった。
+      //   サーバが返すのは幅400px。並べるだけなら足りるが、傷や木目を確かめられない。
+      //   初期表示はw400のまま（速さを落とさない）、タップしたときだけw1000へ差し替える。
+      for (var i = 0; i < imgs.length; i++) {
+        h += '<img class="zoomable" ' + (i === 0 ? "" : 'loading="lazy" ') +
+             'src="' + esc(imgs[i]) + '" alt="" style="cursor:zoom-in;">';
+      }
+      h += "<h2>" + esc(d.name || "") + "</h2>" +
+           '<div class="price">' + esc(priceLabel(d)) + "</div>";
+      // GASが返す名前は `dimensions`（`size` ではない）
+      if (d.dimensions) h += '<p class="sub" style="margin-top:8px;">' + esc(d.dimensions) + "</p>";
+      if (d.category) h += '<p class="sub">' + esc(d.category) + "</p>";
+      // 🔴【2026-08-01・Codex指摘5】カタログ用説明があればそれを使う。
+      //   `カタログ用説明`は客に読ませる短文、`概要(商品説明)`は出品用の長文。
+      //   長文をそのまま出すと写真が主役でなくなる（スマホで見せる方針と逆）。
+      var body = d.catalogDescription || d.description;
+      if (body) h += "<p style=\"margin-top:10px;\">" + esc(body).replace(/\n/g, "<br>") + "</p>";
+      var favOn = FAVS[String(masterId)] === true;   // 一覧と同じ拠り所を使う（詳細も favorited を返さない）
+      h += '<button type="button" class="btn" id="d-fav" data-id="' + esc(masterId) + '" style="margin-top:14px;">' +
+           (favOn ? "♥ お気に入りに入っています" : "♡ お気に入りに入れる") + "</button>";
+      h += '<p class="sub" style="margin-top:10px;">' +
+           "一点ものです。店頭でも販売しているため、ご来店時にお売り切れの場合があります。</p>";
+      h += "</div>";
+      $("detail").innerHTML = h;
+      var zs = $("detail").querySelectorAll(".zoomable");
+      for (var z = 0; z < zs.length; z++) {
+        (function (im) {
+          im.addEventListener("click", function () { openZoom(im.getAttribute("src")); });
+        })(zs[z]);
+      }
+      var fb = $("d-fav");
+      fb.addEventListener("click", function () {
+        fb.disabled = true;
+        var want = fb.textContent.indexOf("♥") === -1;
+        setFav(masterId, want).then(function (on) {
+          fb.textContent = on ? "♥ お気に入りに入っています" : "♡ お気に入りに入れる";
+          afterFavChange();   // 一覧へ戻ったときに消えているように
+        }).catch(function (e) {
+          if (isAuthError(e)) { logout(e.message); return; }
+          window.alert(e.message);
+        }).finally(function () { fb.disabled = false; });
+      });
+      // 見られたことを記録（失敗しても画面は止めない）
+      // 🔴【2026-08-01・Codex指摘】ここは { kind, masterId } を送っていたが、GASが読むのは
+      //    { visitorId, event, ref, note } で、visitorId が無いと**1行も書かずに終わる**。
+      //    つまり閲覧ログが1件も残っていなかった。お気に入りと並んで
+      //    「何が見られて、そのうち何が売れたか」＝仕入れと出品の判断材料なので、
+      //    黙って0件になるのが一番困る（グラフが「人気が無い」に見える）。
+      logView(masterId);
+    }).catch(function (e) {
+      // 🔴【Codex監査(2周目)3】失敗側にも世代番号が要る。
+      //   Aを開く→戻る→Bを開く でBが出た後にAが失敗すると、
+      //   **Bの画面がAのエラーで塗り潰される**（成功側だけ守っても意味が無い）。
+      if (seq !== DETAIL_SEQ) return;
+      if (isAuthError(e)) { logout(e.message); return; }
+      $("detail").innerHTML = '<div class="card"><span class="msg err">' + esc(e.message) + "</span></div>";
+    });
+  }
+
+  // お気に入りを1回だけ取って印にする。
+  // 🔴 これが失敗しても一覧は出す（行き止まりにしない）。印が付かないだけで、
+  //    押せば正しい状態がサーバから返ってくる。
+  // 一覧を描いた後にお気に入りが届いたとき、♥だけ塗り直す（描き直さない）。
+  function repaintFavs() {
+    // 🔴【Codex監査(2周目)5】「お気に入りだけ」を初期取得の前に押すと、
+    //   FAVS が空なので0件になる。あとで届いても塗り直すだけで、0件のまま残っていた。
+    if (FAV_ONLY) { applyFilter(); return; }
+    // 🔴【2026-08-01・Fable5監査(2周目)10】詳細の♥も塗り直す。
+    //   一覧の .fav しか見ていなかったので、初期取得が返る前に詳細を開いた人には
+    //   登録済みでも「♡入れる」のまま見えていた（押せば直るが、一度は嘘を見せる）。
+    var df = document.getElementById("d-fav");
+    if (df) {
+      var dOn = FAVS[String(df.getAttribute("data-id") || "")] === true;
+      df.textContent = dOn ? "♥ お気に入りに入っています" : "♡ お気に入りに入れる";
+    }
+    var btns = $("grid").querySelectorAll(".fav");
+    for (var i = 0; i < btns.length; i++) {
+      var on = FAVS[String(btns[i].getAttribute("data-id"))] === true;
+      btns[i].classList.toggle("on", on);
+      btns[i].textContent = on ? "♥" : "♡";
+    }
+  }
+
+  function loadFavs() {
+    // 🔴【2026-08-01・Codex指摘2】IDだけ要求する（idsOnly）。
+    //   以前は items を取っていたのでGASが公開マスタ全体を読み、さらに
+    //   お気に入り1件ごとにDriveを叩いて画像URLまで作っていた。
+    //   ♥の印に要るのは masterId だけ。
+    FAVS_P = call("listFavorites", { idsOnly: true }).then(function (res) {
+      var ids = (res && res.ids) || [];
+      // 🔴【2026-08-01・Codex監査1】FAVS を丸ごと作り直さない。
+      //   並列化したので、初期取得が返る前に客が♥を押せる。以前はここで FAVS={} にしていたため、
+      //   遅れて届いた「押す前の状態」が**押した結果を消していた**
+      //   （サーバは登録済みなのに画面は♡へ戻る＝押しても効かない品に見える）。
+      //   手で押した分（FAV_TOUCHED）は初期取得より必ず新しいので、上書きしない。
+      var next = {};
+      for (var i = 0; i < ids.length; i++) if (ids[i]) next[String(ids[i])] = true;
+      for (var k in FAV_TOUCHED) {
+        if (Object.prototype.hasOwnProperty.call(FAV_TOUCHED, k)) next[k] = FAV_TOUCHED[k];
+      }
+      FAVS = next;
+      FAVS_READY = true;
+      return "ok";
+    }).catch(function (e) {
+      // 🔴 失敗を「取得済み・0件」と混ぜない。状態が分からないままにする
+      //    （分からないときは押された品だけ isFavorited で確かめる）。
+      FAVS_FAILED = true;
+      // 🔴【2026-08-01・Codex監査(6周目)1】認証エラーまで飲み込まない。
+      //   飲み込むと logout が呼ばれず、壊れたセッションが残ったまま
+      //   「読み直す」を押しても同じ所で失敗し続ける（客は抜けられない）。
+      //   knowFav には入れたのに、全件取得の経路には入れていなかった。
+      // 🔴【2026-08-01・Codex監査(9周目)1】**結果を返す**。
+      //   ここで logout しても Promise は成功状態に戻るので、呼び出し側は
+      //   「お気に入りだけAUTHだった」ことに気づけず、空セッションのまま
+      //   アンケートを聞きに行ってまたAUTHになっていた。
+      if (isAuthError(e)) { logout(e.message); return "auth"; }
+      return "fail";
+    });
+    return FAVS_P;
+  }
+
+  // 写真を大きく見る。閉じ方は「どこを押しても閉じる」＋端末の戻る。
+  function openZoom(src) {
+    var big = String(src || "").replace(/=w\d+$/, "=w1000");
+    var ov = document.createElement("div");
+    ov.setAttribute("style",
+      "position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.92);" +
+      "display:flex;align-items:center;justify-content:center;padding:8px;");
+    ov.innerHTML = '<img src="' + esc(big) + '" alt="" ' +
+      'style="max-width:100%;max-height:100%;object-fit:contain;">' +
+      '<div style="position:absolute;top:calc(10px + env(safe-area-inset-top));right:14px;' +
+      'color:#fff;font-size:15px;">閉じる ✕</div>';
+    var close = function () {
+      if (ov.parentNode) ov.parentNode.removeChild(ov);
+      ZOOM_CLOSE = null;
+    };
+    ov.addEventListener("click", close);
+    ZOOM_CLOSE = close;   // 端末の戻るは共通のハンドラが拾う（二重に効かせない）
+    document.body.appendChild(ov);
+  }
+
+  // ---- 好みアンケート -------------------------------------------------------
+  // 🔴 選択肢は旧カタログと**同じ文言**にする。変えると集計が分断される
+  //    （シートは文字列で貯まるので、表記違いは別の答えとして数えられる）。
+  var SV_LOOKING = ["椅子・ソファ", "テーブル・机", "収納（箪笥・棚）", "照明",
+                    "食器・ガラス", "小物・雑貨", "決めていない"];
+  var SV_BUDGET = ["", "〜1万円", "1〜3万円", "3〜10万円", "10万円〜", "決めていない", "回答しない"];
+  var SV_AGE = ["", "20代以下", "30代", "40代", "50代", "60代以上", "回答しない"];
+  var SV_GENDER = ["", "男性", "女性", "その他", "回答しない"];
+
+  function fillSelect(id, vals) {
+    var sel = $(id);
+    sel.innerHTML = "";
+    for (var i = 0; i < vals.length; i++) {
+      var o = document.createElement("option");
+      o.value = vals[i];
+      o.textContent = vals[i] === "" ? "選択してください" : vals[i];
+      sel.appendChild(o);
+    }
+  }
+
+  function buildSurvey() {
+    var box = $("sv-looking");
+    var h = "";
+    for (var i = 0; i < SV_LOOKING.length; i++) {
+      // タップ先を大きく（指で押せる48px以上）
+      h += '<label style="display:flex;align-items:center;gap:10px;min-height:48px;">' +
+           '<input type="checkbox" value="' + esc(SV_LOOKING[i]) + '" ' +
+           'style="width:22px;height:22px;">' + esc(SV_LOOKING[i]) + "</label>";
+    }
+    box.innerHTML = h;
+    fillSelect("sv-budget", SV_BUDGET);
+    fillSelect("sv-age", SV_AGE);
+    fillSelect("sv-gender", SV_GENDER);
+  }
+
+  function sendSurvey(skipped) {
+    var m = $("sv-msg");
+    var looking = [];
+    var cbs = $("sv-looking").querySelectorAll("input");
+    for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) looking.push(cbs[i].value);
+    $("sv-send").disabled = true; $("sv-skip").disabled = true;
+    m.className = "msg"; m.textContent = skipped ? "閉じています…" : "送っています…";
+    call("savePrefSurvey", {
+      answers: skipped ? { skipped: true } : {
+        looking: looking, budget: $("sv-budget").value,
+        age: $("sv-age").value, gender: $("sv-gender").value
+      }
+    }).then(function () {
+      // 🔴 答えても「あとで」でも、必ず一覧へ戻す（行き止まりを作らない）
+      // 🔴【2026-08-01・Fable5監査(2周目)11】ただし**まだアンケート画面にいるとき**だけ。
+      //   送信中に端末の戻るで抜けて商品を開いた直後に応答が来ると、
+      //   見ている詳細から引き剥がされる（弱い回線ほど起きやすい）。
+      if (stack[stack.length - 1] !== "survey") return;
+      back();
+    }).catch(function (e) {
+      $("sv-send").disabled = false; $("sv-skip").disabled = false;
+      if (isAuthError(e)) { logout(e.message); return; }
+      m.className = "msg err"; m.textContent = e.message;
+    });
+  }
+  $("sv-send").addEventListener("click", function () { sendSurvey(false); });
+  $("sv-skip").addEventListener("click", function () { sendSurvey(true); });
+
+  // まだ答えていない人にだけ、一覧が出てから出す（開いた瞬間に被せない）
+  function maybeAskSurvey() {
+    call("getPrefSurveyStatus", {}).then(function (r) {
+      if (!r || !r.ok || !r.needed) return;
+      // 🔴【2026-08-01・Fable5監査5】いま一覧にいるときだけ出す。
+      //   応答が遅い間に客が商品を開いていると、届いた瞬間に詳細から引き剥がす。
+      //   店内の弱い回線でだけ起きるので、一番起きやすい条件で起きる。
+      if (stack[stack.length - 1] !== "list") return;
+      buildSurvey();
+      go("survey");
+    }).catch(function (e) {
+      // 🔴【2026-08-01・Codex監査(7周目)2】AUTHまで捨てない。
+      //   シートが読めない等でアンケートを出さないのは妥当だが、セッション切れを
+      //   同じ扱いにすると、せっかく返した code が画面の回復処理へ一度も届かない。
+      if (isAuthError(e)) { logout(e.message); return; }
+      /* 認証以外は、聞けなくてもアンケートを出さないだけ（一覧の邪魔をしない） */
+    });
+  }
+
+  // ---- 起動 ----------------------------------------------------------------
+  if (!SESSION) {
+    show("gate");
+  } else {
+    show("list");
+    // 🔴【2026-08-01・Codex監査3】来訪を記録する。旧カタログは visit を送っていたが
+    //   新画面が送っておらず、**一覧だけ見て帰った来訪が1件も残らない**状態だった。
+    //   来店客数の集計に直接効くので、移行で落としてはいけない。
+    logVisit();
+    // 🔴 直列にしない（Codex指摘2）。以前は loadFavs().then(loadList) で、
+    //   お気に入りが返るまで一覧の取得が始まらなかった＝待ち時間が足し算だった。
+    //   同時に投げ、印が間に合わなくても一覧は出す（印は後から付け直す）。
+    var favP = loadFavs();
+    loadList().then(function (ok) {
+      return favP.then(function (favState) {
+        // 🔴 一覧が出せて、お気に入り側も認証で落ちておらず、
+        //    セッションが残っているときだけ聞く（3つとも要る）。
+        return ok && favState !== "auth" && !!SESSION;
+      });
+    }).then(function (ok) {
+      repaintFavs();
+      if (ok) maybeAskSurvey();
+    });
+  }
+  pushHistory();
+})();
+</script>
+</body>
+</html>
