@@ -171,7 +171,8 @@
   #scan-shot-note { color: #fff; text-align: center; font-size: 16px; }
   #scan-shot .btn { background: #fff; color: var(--fg); border-color: #fff; }
   /* 切り替えは主役ではないので、控えめに */
-  #scan-mode { max-width: 420px; background: transparent; color: #fff; border-color: rgba(255,255,255,.5); }
+  #scan-mode { background: none; border: 0; color: #e8ddcf; text-decoration: underline;
+               font: inherit; font-size: 14px; padding: 10px 12px; min-height: 44px; cursor: pointer; }
   #scan-box video { width: 100%; display: block; }
   #scan-note { font-size: 15px; text-align: center; }
   #scan-overlay .msg { color: #ffd9d0; text-align: center; }
@@ -265,6 +266,12 @@
     <button class="btn" data-go="list">
       <span class="t">商品を探す・直す<span class="d">QRを読む／言葉で探す／値段と補足を書く</span></span>
     </button>
+    <!-- 🔴【2026-08-02・オーナー実機「毎回撮影かリーダーか聞かれると鬱陶しい」】
+         読み方は**端末ごとに一度決めれば変わらない**もの。読むたびに選ばせない。
+         ここで決めて覚え、QRの画面には小さな逃げ道だけ残す。 -->
+    <button class="btn" data-go="settings">
+      <span class="t">設定<span class="d">QRの読み方（この端末だけ）</span></span>
+    </button>
     <!-- 🔴 管理モードはオーナーだけ。ここを隠すのは**見やすさのため**であって、
          守っているのはサーバ側（requireAdmin_ が代表・手伝いを拒否する）。
          画面から消すことを対策と呼ばない（CLAUDE.md「絞り込みはサーバ側で行う」）。 -->
@@ -290,6 +297,24 @@
   <!-- 🔴 ふだんは通らない画面。裏で用意が済んでいれば、押した瞬間に /quickreg/ へ飛ぶ。
        ここが出るのは「用意が間に合わなかった」「取れなかった」時だけ＝
        何が起きているかを見せるための画面。行き止まりにしない。 -->
+  <!-- 設定。🔴 **この端末だけ**の話（他の人の端末は変わらない）。
+       サーバへは送らない＝誰かの設定が別の人に降ってくることがない。 -->
+  <section class="view" id="v-settings">
+    <div class="card">
+      <h2>QRの読み方</h2>
+      <div class="sub" style="margin-bottom:12px;">
+        この端末でQRを読むときのやり方です。あとから変えられます。
+      </div>
+      <button class="btn" id="set-shot" type="button">
+        <span class="t">撮って読み取る<span class="d">カメラで1枚撮る。小さいQRはこちらが確実</span></span>
+      </button>
+      <button class="btn" id="set-live" type="button" style="margin-top:10px;">
+        <span class="t">かざして読み取る<span class="d">カメラを向けたまま自動で読む</span></span>
+      </button>
+      <div class="msg ok" id="set-msg" style="margin-top:12px;"></div>
+    </div>
+  </section>
+
   <section class="view" id="v-quickreg">
     <div class="card">
       <h2>QRを貼って登録する</h2>
@@ -472,7 +497,9 @@
   <div id="scan-box"></div>
   <div id="scan-note">QRラベルを枠の中に写してください</div>
   <div id="scan-msg" class="msg"></div>
-  <button class="btn" id="scan-mode" type="button"><span class="t" style="text-align:center;">読み取り（動画）に切り替える</span></button>
+  <!-- 🔴 ここは**逃げ道**であって選択肢ではない（既定は設定で決める）。
+       小さくしてあるのは、読むたびに選ばせないため。 -->
+  <button id="scan-mode" type="button">今回だけ切り替える</button>
   <button class="btn" id="scan-cancel" type="button"><span class="t" style="text-align:center;">やめる</span></button>
 </div>
 
@@ -862,6 +889,7 @@
 
   // 何度呼んでも安全。**必ずカメラを手放す**
   function stopScan() {
+    scanModeOnce = "";     // 「今回だけ」は次に持ち越さない
     var s = scanner;
     scanner = null;
     scanOnDone = null;
@@ -877,7 +905,12 @@
   //   1枚撮って読ませる方が確実。動画のほうが良い端末もあるので、任意で選べるようにし、
   //   選んだら端末に覚える（毎回選び直させない）。
   var K_SCAN_MODE = "takahashi-scan-mode";      // "shot"（撮る・既定）/ "live"（動画）
-  function scanMode() { return get(K_SCAN_MODE) === "live" ? "live" : "shot"; }
+  var scanModeOnce = "";                       // 「今回だけ」＝覚えない一時的な上書き
+  function scanMode() {
+    // 「今回だけ切り替える」を押していればそちら。押していなければ設定の値。
+    if (scanModeOnce) return scanModeOnce;
+    return get(K_SCAN_MODE) === "live" ? "live" : "shot";
+  }
 
   // どちらの見た目を出すか。**カメラは動画のときしか触らない。**
   function applyScanMode() {
@@ -918,9 +951,31 @@
     this.value = "";            // 同じ写真をもう一度選べるように毎回空にする
     scanFromFile(f);
   });
+  // 設定画面。押した時点で覚える（保存ボタンを作らない＝押し忘れが起きない）。
+  function setScanMode(mode) {
+    set(K_SCAN_MODE, mode);
+    var m = $("set-msg");
+    m.textContent = mode === "live"
+      ? "「かざして読み取る」にしました。"
+      : "「撮って読み取る」にしました。";
+    applyScanMode();
+  }
+  ONSHOW["settings"] = showScanModeSetting;
+  $("set-shot").addEventListener("click", function () { setScanMode("shot"); });
+  $("set-live").addEventListener("click", function () { setScanMode("live"); });
+
+  // 🔴 いまどちらなのかが**開いた時点で分かる**ようにする（設定は見えないと直せない）。
+  function showScanModeSetting() {
+    $("set-msg").textContent = scanMode() === "live"
+      ? "いまは「かざして読み取る」です。"
+      : "いまは「撮って読み取る」です。";
+  }
+
+  // QRの画面の「今回だけ切り替える」＝**覚えない**。
+  // ⚠️ ここで覚えると、1回の困りごとがその端末の既定になってしまう。
   $("scan-mode").addEventListener("click", function () {
-    var next = scanMode() === "live" ? "shot" : "live";
-    set(K_SCAN_MODE, next);
+    var next = (scanModeOnce || scanMode()) === "live" ? "shot" : "live";
+    scanModeOnce = next;
     // 動画を出していたなら必ず止めてから切り替える（カメラを掴んだままにしない）
     var f = scanOnDone;
     var s = scanner;
