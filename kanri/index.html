@@ -2217,6 +2217,23 @@
   ];
   var CATEGORY_OPTIONS = null;   // 一度取ったら覚える
 
+  // カテゴリの選択肢を取る。**取れなくても編集は続けられる**が、失敗は覚えない。
+  //
+  // 🔴 AUTHだけはそのまま投げる。ここで「選択肢が無いだけ」に変えると成功扱いになり、
+  //    空のセッションのまま次のRPCを送り続ける（共通部の入り直しが打ち消される）。
+  // 🔴 失敗を覚えない（`[]` は truthy なので、1回の通信失敗でそのセッション中
+  //    ずっと取り直さなくなり、選択肢が空のまま保存できてしまう）。
+  function ensureCategoryOptions() {
+    if (CATEGORY_OPTIONS) return Promise.resolve(CATEGORY_OPTIONS);
+    return call("getCategoryOptions", {}).then(function (o) {
+      CATEGORY_OPTIONS = (o && o.categories) || o || [];
+      return CATEGORY_OPTIONS;
+    }).catch(function (e) {
+      if (isAuthError(e)) throw e;
+      return [];
+    });
+  }
+
   function editRender(masterId, d) {
     var rev = d["更新バージョン"];
     var h = '<div class="card"><h2>' + esc(d["商品名"] || masterId) + "</h2>" +
@@ -2309,23 +2326,7 @@
     if (seq === undefined) seq = bumpSeq("edt");
     else if (isStale("edt", seq)) return;
     $("edt-detail").innerHTML = '<div class="card sub">読み込んでいます…</div>';
-    var need = CATEGORY_OPTIONS ? Promise.resolve(CATEGORY_OPTIONS)
-      : call("getCategoryOptions", {}).then(function (o) {
-          CATEGORY_OPTIONS = (o && o.categories) || o || [];
-          return CATEGORY_OPTIONS;
-        }).catch(function (e) {
-          // 🔴【2026-08-01・Codex監査(11周目)3】AUTHまで「選択肢が無いだけ」に変えない。
-          //   変えると need が成功になり、**空セッションのまま詳細RPCを続けて送る**。
-          //   共通部で1回だけ入り直す修正を、この成功変換が打ち消していた。
-          if (isAuthError(e)) throw e;
-          // 🔴【2026-08-01・Fable5監査M-9】失敗を**キャッシュしない**。
-          //   `CATEGORY_OPTIONS = []` は truthy なので、一過性の通信失敗1回で
-          //   そのセッション中ずっと再取得しなくなり、選択肢が空のまま保存できてしまう。
-          //   選択肢が取れなくても編集は続けられる（いまの値は上で残す）が、
-          //   次に開いたときは取り直す。
-          return [];
-        });
-    need.then(function () {
+    ensureCategoryOptions().then(function () {
       // 🔴【Fable5監査M-10】この画面は写真を使わない。Driveの列挙を頼まない。
       return call("getAdminProductDetail", { masterId: masterId, skipImages: true });
     }).then(function (d) {
@@ -2378,7 +2379,16 @@
     var blocked = !!(el && el.blocked);
     var warnings = (el && el.warnings) || [];
     if (!Array.isArray(warnings)) warnings = [warnings];
-    var h = '<div class="card"><h2>' + esc(masterId) + "</h2>";
+    // 🔴【2026-08-02・オーナー実機「プレビューや商品タイトル説明文が出ません」】
+    //   ここは**現物を手に持って、ネットに出すかを決める画面**。
+    //   IDだけでは「いま持っているものがこれか」も「出す価値があるか」も判断できない。
+    //   写真・商品名・説明を出す（写真は後追いで入れて、判定を待たせない）。
+    var h = '<div class="card">' +
+            '<img id="net-th" alt="" style="display:none; width:100%; max-height:240px;' +
+            'object-fit:contain; border-radius:12px; background:#efe9de; margin-bottom:12px;">' +
+            '<h2 id="net-name">' + esc(masterId) + "</h2>" +
+            '<div class="sub" id="net-sub" style="margin-bottom:10px;">' + esc(masterId) + "</div>" +
+            '<div id="net-desc"></div>';
     if (el && el.alreadyQueued) {
       h += '<div class="msg ok" style="margin-bottom:10px;">この品はもう出品リストに入っています。</div>';
     }
@@ -2407,10 +2417,27 @@
              '<span class="t">先に直しに行く</span></button>';
       }
     }
-    h += '<button class="btn" id="net-shot" type="button" style="margin-top:8px;">' +
+    // 🔴【2026-08-02・オーナー実機「ターンテーブルしか指定がない。通常撮影も必要」】
+    //   ターンテーブルは1周撮る道具で、置けない大きな家具や、
+    //   1枚だけ足したい時（傷・裏面・銘）には使えない。普通に撮る道を必ず残す。
+    //   ⚠️ 置き場は `{ID}/net/`＝**カタログ用とは分ける**（客が見る面に裏面や傷が出ない）。
+    h += '<div style="margin-top:14px; border-top:1px solid var(--line); padding-top:12px;">' +
+         '<div class="sub" style="margin-bottom:8px;">出品用の写真（カタログ用とは別に貯まります）</div>' +
+         '<input id="net-file" type="file" accept="image/*" multiple ' +
+         'style="position:absolute;width:1px;height:1px;opacity:0;">' +
+         '<button class="btn" id="net-photo" type="button">' +
+         '<span class="t">写真を撮る・選ぶ</span></button>' +
+         '<button class="btn" id="net-shot" type="button" style="margin-top:8px;">' +
          '<span class="t">ぐるっと撮る（ターンテーブル）</span></button>' +
+         '<div class="msg" id="net-photo-msg"></div></div>' +
          '<div class="msg" id="net-r"></div></div>';
     $("net-detail").innerHTML = h;
+
+    // ---- 商品名・説明・採寸などを、この画面で直せるようにする ----------------
+    // 🔴【2026-08-02・オーナー実機「採寸などを入れる項目もない」】
+    //   足りないものは判定に出るのに、直しに行くには別画面へ移る必要があった。
+    //   現物が手元にある**この場**で入れられないと、結局あとで分からなくなる。
+    netLoadDetail(masterId);
 
     var ok = !blocked;
     if (ok) {
@@ -2455,6 +2482,156 @@
         r.textContent = "撮影ページのURLを受け取れませんでした。";
       }).catch(function (e) { r.className = "msg err"; r.textContent = e.message; });
     });
+  }
+
+  // ネット出品を決めるのに要る項目。**この場で直せる分だけ**。
+  // ⚠️ 値段はここに置かない（値付けと値段の変更は専用の口が持っていて、
+  //    そちらは位の関所と判断ログを通る。ここから書けると素通りの道ができる）。
+  var NET_FIELDS = [
+    ["商品名", "text"],
+    ["カテゴリ", "select"],
+    ["採寸", "text"],
+    ["発送サイズ区分", "text"],
+    ["概要(商品説明)", "textarea"],
+    ["状態メモ", "textarea"]
+  ];
+
+  // 写真・商品名・説明・入力欄を後から入れる（判定の表示を待たせない）。
+  function netLoadDetail(masterId) {
+    // 写真（1枚を大きく出すので px を上げる）
+    call("getPricingThumbnails", { masterIds: [masterId], px: 800 }).then(function (map) {
+      var url = map && map[masterId];
+      var im = $("net-th");
+      if (!im || !url) return;
+      im.onload = function () { im.style.display = ""; };
+      im.src = url;
+    }).catch(function () { /* 写真が無くても判断はできる（行き止まりにしない） */ });
+
+    ensureCategoryOptions().then(function () {
+      return call("getAdminProductDetail", { masterId: masterId, skipImages: true });
+    }).then(function (d) {
+      if (!d) return;
+      var rev = d["更新バージョン"];
+      $("net-name").textContent = d["商品名"] || masterId;
+      $("net-sub").textContent = masterId + "　" + (d["在庫ステータス"] || "");
+      // 🔴 「返っていない」と「本当に空」を混ぜない（GASで一度踏んだ形）
+      if (Object.prototype.hasOwnProperty.call(d, "概要(商品説明)")) {
+        $("net-desc").innerHTML = d["概要(商品説明)"]
+          ? '<details style="margin-bottom:12px;"><summary style="cursor:pointer;min-height:44px;' +
+            'display:flex;align-items:center;font-weight:700;">いまの説明を読む</summary>' +
+            '<div class="sub" style="margin-top:8px;white-space:pre-wrap;">' +
+            esc(d["概要(商品説明)"]) + "</div></details>"
+          : '<div class="sub" style="margin-bottom:12px;">まだ説明はありません。</div>';
+      }
+
+      // 入力欄（足りないものをこの場で埋める）
+      var f = '<div style="margin-top:14px; border-top:1px solid var(--line); padding-top:12px;">' +
+              '<div class="sub" style="margin-bottom:8px;">出品に要る項目（この場で直せます）</div>';
+      for (var i = 0; i < NET_FIELDS.length; i++) {
+        var nm = NET_FIELDS[i][0], kind = NET_FIELDS[i][1];
+        var v = d[nm] == null ? "" : String(d[nm]);
+        f += '<label class="f"><span>' + esc(nm) + "</span>";
+        if (kind === "textarea") {
+          f += '<textarea data-nf="' + esc(nm) + '" rows="3" style="width:100%;min-height:88px;' +
+               'padding:10px 12px;border:1px solid var(--line);border-radius:12px;font:inherit;' +
+               'background:#fff;color:var(--fg);">' + esc(v) + "</textarea>";
+        } else if (kind === "select") {
+          f += '<select data-nf="' + esc(nm) + '" class="input" style="width:100%;min-height:52px;">' +
+               '<option value="">（未設定）</option>';
+          var opts = CATEGORY_OPTIONS || [], found = false;
+          for (var k = 0; k < opts.length; k++) {
+            var o = String(opts[k]);
+            if (o === v) found = true;
+            f += '<option value="' + esc(o) + '"' + (o === v ? " selected" : "") + ">" + esc(o) + "</option>";
+          }
+          // 🔴 いまの値が選択肢に無いとき、黙って「（未設定）」にしない（保存すると消える）
+          if (v && !found) f += '<option value="' + esc(v) + '" selected>' + esc(v) + "（いまの値）</option>";
+          f += "</select>";
+        } else {
+          f += '<input type="text" data-nf="' + esc(nm) + '" value="' + esc(v) + '">';
+        }
+        f += "</label>";
+      }
+      f += '<button class="btn primary" id="net-save" type="button">' +
+           '<span class="t">直して、判定をやり直す</span></button>' +
+           '<div class="msg" id="net-save-msg"></div></div>';
+      var box = document.createElement("div");
+      box.innerHTML = f;
+      $("net-detail").querySelector(".card").appendChild(box);
+
+      $("net-save").addEventListener("click", function () {
+        var m = $("net-save-msg");
+        var patch = { __expectedRev: rev }, changed = 0;
+        var els = $("net-detail").querySelectorAll("[data-nf]");
+        for (var j = 0; j < els.length; j++) {
+          var nm2 = els[j].getAttribute("data-nf");
+          var now = String(els[j].value == null ? "" : els[j].value);
+          var was = d[nm2] == null ? "" : String(d[nm2]);
+          // 🔴 変えていない列は送らない（他の人が直した列を古い値で潰さない）
+          if (now !== was) { patch[nm2] = now; changed += 1; }
+        }
+        if (!changed) { m.className = "msg"; m.textContent = "変わっていません。"; return; }
+        $("net-save").disabled = true;
+        m.className = "msg"; m.textContent = "保存しています…";
+        call("updateProductFields", { masterId: masterId, patch: patch }).then(function (r) {
+          // 🔴 送った数ではなく**サーバが保存した数**を出す
+          var n = ((r && r.saved) || []).length;
+          if (!n) { m.className = "msg err"; m.textContent = "保存されませんでした。"; return; }
+          m.className = n === changed ? "msg ok" : "msg err";
+          m.textContent = n === changed
+            ? n + "か所を保存しました。判定をやり直します…"
+            : n + "か所だけ保存しました（" + (changed - n) + "か所は保存できていません）。";
+          if (r && r.warning) m.textContent += " " + r.warning;
+          // 直したら判定をやり直す（「足りない」が消えたかを、その場で見せる）
+          netGo();
+        }).catch(function (e) {
+          m.className = "msg err"; m.textContent = e.message;
+        }).finally(function () { $("net-save").disabled = false; });
+      });
+    }).catch(function () { /* 判定は既に出ている。ここが落ちても画面は使える */ });
+
+    // ---- 出品用の写真を足す ----
+    $("net-photo").addEventListener("click", function () { $("net-file").click(); });
+    $("net-file").addEventListener("change", function () {
+      var files = Array.prototype.slice.call(this.files || []);
+      this.value = "";
+      if (!files.length) return;
+      var m = $("net-photo-msg");
+      var done = 0, failed = 0;
+      m.className = "msg"; m.textContent = "送っています… 0/" + files.length;
+      // 🔴 1枚ずつ順に送る。まとめて投げると、途中で落ちたとき何が入ったか分からない。
+      (function next(i) {
+        if (i >= files.length) {
+          m.className = failed ? "msg err" : "msg ok";
+          m.textContent = failed
+            ? done + "枚を入れました（" + failed + "枚は入りませんでした）。"
+            : done + "枚を入れました。";
+          return;
+        }
+        var fr = new FileReader();
+        fr.onload = function () {
+          call("uploadNetImage", {
+            masterId: masterId,
+            // ⚠️ 名前が重なると受け口が断る。時刻と番号を付けて重ならないようにする
+            fileName: "net-" + Date.now() + "-" + i + nameExt(files[i].name),
+            dataBase64: String(fr.result || "")
+          }).then(function () { done += 1; })
+            .catch(function () { failed += 1; })
+            .finally(function () {
+              m.textContent = "送っています… " + (done + failed) + "/" + files.length;
+              next(i + 1);
+            });
+        };
+        fr.onerror = function () { failed += 1; next(i + 1); };
+        fr.readAsDataURL(files[i]);
+      })(0);
+    });
+  }
+
+  // 拡張子だけ取り出す（受け口は jpg/jpeg/png しか受けない）
+  function nameExt(n) {
+    var m = /\.(jpe?g|png)$/i.exec(String(n || ""));
+    return m ? m[0].toLowerCase() : ".jpg";
   }
 
   function netGo() {
