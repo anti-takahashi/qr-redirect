@@ -166,9 +166,32 @@
             style="min-height:48px; margin-bottom:12px; font-size:14px;">
       ♡ お気に入りだけ見る
     </button>
+    <!-- 🔴【2026-08-02・オーナー】並べ替え。既定は**新しい順**
+         （「新しい順なら新着が分かりやすい」）。 -->
+    <label class="f" style="display:block; margin-bottom:12px;">
+      <span class="sub">並べ替え</span>
+      <select id="sort" class="input"
+              style="width:100%; min-height:48px; font-size:15px;">
+        <option value="new">新しい順</option>
+        <option value="old">古い順</option>
+        <option value="high">価格が高い順</option>
+        <option value="low">価格が安い順</option>
+        <option value="fav">お気に入りが多い順</option>
+      </select>
+    </label>
     <div class="msg" id="list-msg">読み込んでいます…</div>
     <div class="grid" id="grid"></div>
-    <button class="btn" id="more" type="button" style="display:none; margin-top:12px;">もっと見る</button>
+    <!-- 🔴【2026-08-02・オーナー】「読み込み式だと2000点で縦長すぎる」
+         → **ページ方式**にした。1画面ぶんだけ描き、前後で送る。
+         ⚠️ タップ先は48px以上（指で押せる）。 -->
+    <div id="pager" style="display:none; margin-top:14px; align-items:center; gap:10px;">
+      <button class="btn" id="prev" type="button"
+              style="flex:1; min-height:48px; margin:0;">← 前へ</button>
+      <div id="page-now" class="sub"
+           style="min-width:96px; text-align:center; font-variant-numeric:tabular-nums;"></div>
+      <button class="btn" id="next" type="button"
+              style="flex:1; min-height:48px; margin:0;">次へ →</button>
+    </div>
   </section>
 
   <!-- 好みアンケート（LINE会員・初回1回だけ）
@@ -253,7 +276,7 @@
 
   var K_SES = "takahashi-members-session";
   var SESSION = "";
-  var PAGE = { limit: 24, keyword: "", category: "", rows: [] };
+  var PAGE = { limit: 24, page: 0, keyword: "", category: "", sort: "new", rows: [] };
   // お気に入りの印。listFavorites を**1回**呼んで作る（1件ずつ聞くと点数ぶん通信する）。
   // 🔴 サーバの一覧・詳細は favorited を返さない。ここが唯一の拠り所なので、
   //    押した結果は必ずここへ書き戻す（描き直しで消えないように）。
@@ -570,6 +593,15 @@
     return yen(it.price);
   }
 
+  // 🔴【2026-08-02・オーナー】お気に入りの数を出す（ヤフオクのウォッチ数の考え方）。
+  //    「人気があるものは早く決めないと」と伝わる。
+  //    ⚠️ 0のときは**出さない**（0と書くと、かえって人気が無いように見える）。
+  function favBadge(n) {
+    n = Number(n || 0);
+    if (n <= 0) return "";
+    return '<span class="sub" style="font-size:12px;">♡ ' + n + "人</span>";
+  }
+
   function itemHtml(it) {
     var img = it.coverImageUrl || "";   // 一覧が返す写真はこの1つだけ（images は詳細のみ）
     var on = FAVS[String(it.masterId)] === true;
@@ -579,7 +611,8 @@
       'data-id="' + esc(it.masterId) + '" aria-label="お気に入り">' +
       (on ? "♥" : "♡") + "</button>" +
       '<div class="b"><div class="n">' + esc(it.name || "") + "</div>" +
-      '<div class="p">' + esc(priceLabel(it)) + "</div></div></div>";
+      '<div class="p">' + esc(priceLabel(it)) + "</div>" +
+      favBadge(it.favoriteCount) + "</div></div>";
   }
 
   function wireItems(from) {
@@ -618,19 +651,65 @@
   //    毎回**全件**返していた。つまり「もっと見る」を押すたびに同じ品が丸ごと追加され、
   //    ボタンも消えなかった（rows.length は常に limit 以上）。エラーは出ない。
   //    GASが全件返す以上、取得は1回で足りる＝通信も減って速くなる。
-  function renderChunk() {
+  // 🔴【2026-08-02・オーナー】ページ方式。**継ぎ足さず、そのページだけ描く**。
+  //    継ぎ足す形だと、点数が増えたときに縦に伸び続けて戻れなくなる。
+  //    ⚠️ ページを変えたら**一番上へ戻す**（下の方を見たまま次ページになると、
+  //       何が変わったのか分からない）。
+  function renderChunk(keepScroll) {
     var msg = $("list-msg");
     var rows = PAGE.rows;
-    var before = $("grid").querySelectorAll(".item").length;
-    var end = Math.min(before + PAGE.limit, rows.length);
+    var pages = Math.max(1, Math.ceil(rows.length / PAGE.limit));
+    if (PAGE.page >= pages) PAGE.page = pages - 1;
+    if (PAGE.page < 0) PAGE.page = 0;
+    var from = PAGE.page * PAGE.limit;
+    var end = Math.min(from + PAGE.limit, rows.length);
     var h = "";
-    for (var i = before; i < end; i++) h += itemHtml(rows[i]);
-    $("grid").insertAdjacentHTML("beforeend", h);
-    wireItems(before);
-    var shown = end;
-    $("more").style.display = (shown < rows.length) ? "" : "none";
-    $("more").textContent = "もっと見る（残り " + (rows.length - shown) + " 点）";
+    for (var i = from; i < end; i++) h += itemHtml(rows[i]);
+    $("grid").innerHTML = h;
+    wireItems(0);
+    // 1ページで収まるときは、送りそのものを出さない（押せないボタンを見せない）
+    $("pager").style.display = (pages > 1) ? "flex" : "none";
+    $("page-now").textContent = (PAGE.page + 1) + " / " + pages + "（全 " + rows.length + " 点）";
+    $("prev").disabled = (PAGE.page === 0);
+    $("next").disabled = (PAGE.page >= pages - 1);
     msg.textContent = "";
+    if (!keepScroll) {
+      try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) { window.scrollTo(0, 0); }
+    }
+  }
+
+  // 🔴 並べ替え。**基準が無い品を先頭へ出さない**
+  //    （登録日が空・値段が無い品が上に来ると、新着にも価格順にも見えない）。
+  //    ⚠️ 同点のときは商品IDで揃える（開くたびに順番が変わると、探し直せない）。
+  function sortRows(rows) {
+    var by = PAGE.sort;
+    var last = "0000-00-00";
+    rows.sort(function (a, b) {
+      var r = 0;
+      if (by === "new" || by === "old") {
+        var da = String(a.registeredAt || last), db = String(b.registeredAt || last);
+        r = (da < db) ? -1 : (da > db) ? 1 : 0;
+        if (by === "new") r = -r;
+      } else if (by === "high" || by === "low") {
+        // 値段が無い品（応談・SOLD）は**必ず後ろ**へ
+        var pa = (typeof a.price === "number") ? a.price : null;
+        var pb = (typeof b.price === "number") ? b.price : null;
+        if (pa === null && pb === null) r = 0;
+        else if (pa === null) return 1;
+        else if (pb === null) return -1;
+        else r = (by === "high") ? (pb - pa) : (pa - pb);
+      } else if (by === "fav") {
+        r = (Number(b.favoriteCount || 0) - Number(a.favoriteCount || 0));
+      }
+      if (r !== 0) return r;
+      return String(a.masterId) < String(b.masterId) ? -1 : 1;
+    });
+    return rows;
+  }
+
+  function goPage(d) {
+    PAGE.page += d;
+    renderChunk();
   }
 
   // 🔴【2026-08-01・Codex指摘3】検索・絞り込みで**毎回サーバへ行かない**。
@@ -655,10 +734,13 @@
               + " " + String(it.catalogDescription || "");
       return hay.indexOf(kw) !== -1;
     });
+    sortRows(PAGE.rows);
     $("grid").innerHTML = "";
+    // 🔴 絞り込みを変えたら**1ページ目へ戻す**（3ページ目のまま件数が減ると空に見える）
+    PAGE.page = 0;
     var msg = $("list-msg");
     if (!PAGE.rows.length) {
-      $("more").style.display = "none";
+      $("pager").style.display = "none";
       msg.className = "msg";
       if (FAV_ONLY && FAVS_FAILED) { favLoadWarning(); return; }
       msg.textContent = (kw || cat)
@@ -699,7 +781,7 @@
     $("grid").innerHTML = "";
     msg.className = "msg";
     msg.textContent = "読み込んでいます…";
-    $("more").style.display = "none";
+    $("pager").style.display = "none";
     return call("membersCatalogList", { params: {} }).then(function (res) {
       var rows = (res && (res.items || res.rows)) || (Array.isArray(res) ? res : []);
       ALL = rows;
@@ -727,7 +809,12 @@
       //   アンケートは「まず品を見てもらってから聞く」ものなので、順番が壊れる。
     });
   }
-  $("more").addEventListener("click", renderChunk);
+  $("prev").addEventListener("click", function () { goPage(-1); });
+  $("next").addEventListener("click", function () { goPage(1); });
+  $("sort").addEventListener("change", function () {
+    PAGE.sort = this.value;
+    applyFilter();
+  });
   $("favonly").addEventListener("click", function () {
     FAV_ONLY = !FAV_ONLY;
     $("favonly").textContent = FAV_ONLY ? "♥ お気に入りだけ（もどす）" : "♡ お気に入りだけ見る";
