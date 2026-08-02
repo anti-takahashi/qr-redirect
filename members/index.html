@@ -231,8 +231,11 @@
   //   （2026-07-29に実測。キーQRと中継では既に塞いでいたが、
   //    画面が直接叩くこの口だけ残っていた）。
   //   ⚠️ 302の先へも引き継がれる。GAS側は知らないパラメータを無視するだけ。
-  var API = "https://script.google.com/macros/s/" +
-    "AKfycbxAOpYw6XwevYwLFEahsEvKJfqkxnACdrtpsWaWSFqWR-ltooiVGfLMBwJe6bABSJN1/exec?authuser=0";
+  // 🔴【2026-08-02・クラウド移行】宛先を**自前の受け口**へ。
+  //    ⚠️ 印刷済みラベルの着地点（GASの /exec）は**別物で、そのまま残している**。
+  //       ここで変えたのは会員カタログのデータの口だけ。
+  //    ⚠️ Googleを踏まないので `authuser=0` の対策そのものが不要になった。
+  var API = "https://api.antiquekagu-takahashi.com/";
 
   // 🔴【2026-08-01・Fable5監査(2周目)4】プライバシーポリシーは `../privacy.html` を
   //   指していたが、**そのファイルはどこにも無い**（自社ドメインにも置いていない）。
@@ -479,23 +482,29 @@
   //   **遷移は同じ書き換えを受ける**ので、その端末ではログインできないままだった。
   //   → 先に doPost で認可URLを受け取り、**LINEへ直接**飛ぶ（GASを一度も踏まない）。
   //   ⚠️ 取れなかったときは今までどおりGASへ遷移する（動いている道は塞がない）。
-  // 🔴 API は既に `?authuser=0` を持っている。`?` を2つ続けると
-  //    `authuser=0?action=lineLoginStart` という1つの値になり、**action が届かない**。
-  //    ここは逃げ道なので、普段は気づけない（2026-08-02に読んで見つけた）。
-  $("login").href = API + "&action=lineLoginStart";
+  // 🔴【2026-08-02】GASへ遷移する逃げ道は**外した**。
+  //    宛先が受け口になったので、GASへ飛ばしても会員カタログは動かない
+  //    ＝繋がるのに何もできない道は、逃げ道ではなく落とし穴になる。
+  //    ⚠️ 取れなかったときは押しても何も起きないのではなく、**理由を出す**（下）。
+  $("login").href = "#";
   $("login").addEventListener("click", function (ev) {
     if (ev.defaultPrevented) return;
     ev.preventDefault();
     var a = this;
     a.textContent = "LINEへ移動しています…";
-    call("getLineLoginUrl", { t: qs("t") || "" }).then(function (r) {
+    call("catalogLoginUrl", { t: qs("t") || "" }).then(function (r) {
       if (r && r.ok && /^https:\/\/access\.line\.me\//.test(String(r.url || ""))) {
         location.href = r.url;
         return;
       }
-      location.href = a.href;   // 形が違うときは触らない（オープンリダイレクトを作らない）
-    }).catch(function () {
-      location.href = a.href;
+      // 形が違うときは飛ばさない（オープンリダイレクトを作らない）
+      a.textContent = "公式LINEでログイン";
+      $("gate-msg").className = "msg err";
+      $("gate-msg").textContent = "ログイン先を用意できませんでした。もう一度お試しください。";
+    }).catch(function (e) {
+      a.textContent = "公式LINEでログイン";
+      $("gate-msg").className = "msg err";
+      $("gate-msg").textContent = (e && e.message) || "ログイン先を用意できませんでした。";
     });
   });
 
@@ -691,7 +700,7 @@
     msg.className = "msg";
     msg.textContent = "読み込んでいます…";
     $("more").style.display = "none";
-    return call("getMembersCatalogList", { params: {} }).then(function (res) {
+    return call("membersCatalogList", { params: {} }).then(function (res) {
       var rows = (res && (res.items || res.rows)) || (Array.isArray(res) ? res : []);
       ALL = rows;
       fillCategories();
@@ -786,14 +795,14 @@
     var known = false;
     try { known = !!localStorage.getItem(VISITOR_ID_KEY); } catch (e) {}
     var id = visitorId();   // 無ければここで作られる
-    call("logCatalogEvent", {
+    call("catalogLogEvent", {
       payload: { visitorId: id, event: "visit", ref: "members",
                  note: known ? "returning" : "new" }
     }).catch(function () {});
   }
 
   function logView(masterId) {
-    call("logCatalogEvent", {
+    call("catalogLogEvent", {
       payload: { visitorId: visitorId(), event: "view", ref: String(masterId || ""), note: "" }
     }).catch(function () { /* 記録できなくても画面は止めない */ });
   }
@@ -814,7 +823,7 @@
     go("detail");
     var seq = ++DETAIL_SEQ;
     $("detail").innerHTML = '<div class="card sub">読み込んでいます…</div>';
-    call("getMembersCatalogDetail", { masterId: masterId }).then(function (d) {
+    call("membersCatalogDetail", { masterId: masterId }).then(function (d) {
       if (seq !== DETAIL_SEQ) return;   // もう別の品を開いている
       if (!d) {
         $("detail").innerHTML = '<div class="card"><span class="msg err">この品は見つかりませんでした。</span></div>';
