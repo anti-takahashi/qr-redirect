@@ -553,7 +553,9 @@
       //   通信はブラウザキャッシュに載るが、**1枚あたり5.1MBのビットマップを展開する**ので、
       //   5点入った候補で25MB。レジ前で固まるのはこれ。
       //   既にlocalStorageへ保存済みの古いURLも**読むときに直す**（会員一覧と同じ手）。
-      var thumbUrl = String(it.thumbnail || '').replace(/=w\d+$/, '=w296');
+      var thumbUrl = String(it.thumbnail || '')
+        .replace(/=w\d+$/, '=w296')
+        .replace(/([?&])px=\d+/, '$1px=296');
       var img = thumbUrl ? '<img src="' + escapeHtml(thumbUrl) + '" alt="" loading="lazy" decoding="async">' : '';
       var price = (it.price != null && it.price !== '' && isFinite(Number(it.price)))
         ? yen(it.price) : '価格応談';
@@ -599,7 +601,10 @@
     }
     // 🔴【2026-07-29】一覧・詳細は表示枠に合わせた小さい画像を配っている（=w296）。
     //   拡大したときだけ大きいものを取りに行く＝**拡大しない客が大きい画像の代金を払わない**。
-    lb.querySelector('img').src = String(item.image || '').replace(/=w\d+$/, '=w1000');
+    // 🔴 出どころが2通りある（受け口の `?px=` と、旧CDNの `=w1000`）。**両方に効かせる**
+    lb.querySelector('img').src = String(item.image || '')
+      .replace(/=w\d+$/, '=w1000')
+      .replace(/([?&])px=\d+/, '$1px=1000');
     lb.classList.add('open');
     document.body.style.overflow = 'hidden';
   }
