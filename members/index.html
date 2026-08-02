@@ -225,8 +225,14 @@
   //       ラベルの着地点は変えられないので、そちらの道は触らない。
   // ==========================================================================
 
+    // 🔴【2026-08-01・オーナー実機】`authuser=0` を付ける。
+  //   Googleに複数アカウントでログインしている端末では、これが無いと
+  //   `/macros/s/…` が `/macros/u/1/s/…` へ書き換えられて**404になる**
+  //   （2026-07-29に実測。キーQRと中継では既に塞いでいたが、
+  //    画面が直接叩くこの口だけ残っていた）。
+  //   ⚠️ 302の先へも引き継がれる。GAS側は知らないパラメータを無視するだけ。
   var API = "https://script.google.com/macros/s/" +
-    "AKfycbxAOpYw6XwevYwLFEahsEvKJfqkxnACdrtpsWaWSFqWR-ltooiVGfLMBwJe6bABSJN1/exec";
+    "AKfycbxAOpYw6XwevYwLFEahsEvKJfqkxnACdrtpsWaWSFqWR-ltooiVGfLMBwJe6bABSJN1/exec?authuser=0";
 
   // 🔴【2026-08-01・Fable5監査(2周目)4】プライバシーポリシーは `../privacy.html` を
   //   指していたが、**そのファイルはどこにも無い**（自社ドメインにも置いていない）。

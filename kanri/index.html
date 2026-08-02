@@ -733,8 +733,21 @@
   //   ⚠️ 引数の api= が来たらそちらを優先する（デプロイを移したときの逃げ道を残す）。
   //   ⚠️ ここは admin-app の /exec。**変えるときは deploy ID ごと**。
   //      引数なしの clasp deploy でIDが変わると、ここも直さないと繋がらなくなる。
-  var API_DEFAULT = "https://script.google.com/macros/s/" +
-    "AKfycbw2BGhgYrZujEVnpxEgkJsurAWLKD-KUZuMEuxb3ig302pBt7K1wE15a5Af3yaqCaoN/exec";
+    // 🔴【2026-08-01・オーナー実機】`authuser=0` を付ける。
+  //   Googleに複数アカウントでログインしている端末では、これが無いと
+  //   `/macros/s/…` が `/macros/u/1/s/…` へ書き換えられて**404になる**
+  //   （2026-07-29に実測。キーQRと中継では既に塞いでいたが、
+  //    画面が直接叩くこの口だけ残っていた）。
+  //   ⚠️ 302の先へも引き継がれる。GAS側は知らないパラメータを無視するだけ。
+  // 🔴【2026-08-02・クラウド移行 順序⑧】宛先を**自前の受け口**へ切り替えた。
+  //   同時に正本もSQLiteへ移してある（順序⑦・戻せない）。
+  //   ⚠️ 上に書いてある `authuser=0` と deploy ID の注意は、下の GAS 側にだけ効く話。
+  //      自前の受け口はGoogleアカウントを見ないので、この2つの落とし穴は消えた。
+  var API_DEFAULT = "https://api.antiquekagu-takahashi.com/";
+
+  // 逃げ道として残してあるGAS（正本ではない＝ここへ戻すと**古い中身**が見える）
+  var API_GAS_OLD = "https://script.google.com/macros/s/" +
+    "AKfycbw2BGhgYrZujEVnpxEgkJsurAWLKD-KUZuMEuxb3ig302pBt7K1wE15a5Af3yaqCaoN/exec?authuser=0";
 
   // 🔴【2026-08-01・Fable5監査M-7】接続先は**この2本の完全一致だけ**にする。
   //   以前は「script.google.com で始まること」しか見ていなかったが、
@@ -743,7 +756,10 @@
   //   localStorage の鍵とセッションが相手の doPost へ送られる。
   //   デプロイを移すときの逃げ道は「移行先をここへ足す」形で残す（1行の追加で済む）。
   //   ⚠️ 検証は**保存より先**に行う（順番が逆だと、弾く前に書き込んでしまう）。
-  var API_ALLOW = [API_DEFAULT];   // 移行するときは移行先をここへ足す
+  //   ⚠️【2026-08-02】GASを残したのは**切替直後の逃げ道**として。
+  //      ただし正本はもうSQLite側なので、こちらへ戻すと**古い中身**が見える。
+  //      GAS側の書き込みを止めたら、この行を消すこと（そのとき戻り道は無くなる）。
+  var API_ALLOW = [API_DEFAULT, API_GAS_OLD];
 
   function safeApi(v) {
     return (v && API_ALLOW.indexOf(v) !== -1) ? v : "";
@@ -761,6 +777,17 @@
   //   実際には既定のまま動くので、直したはずの不具合が直っていないように見える。
   //   （弾く判断そのものは変えない。deny-by-default のまま、理由だけ見せる）
   var API_REJECTED = !!qs("api") && !safeApi(qs("api"));
+  // 🔴【2026-08-02】**覚えている宛先を、1回だけ捨てる。**
+  //   既に使っている端末は localStorage に古いGASの宛先を持っている。
+  //   逃げ道として API_ALLOW にGASを残した結果、**記憶が勝って切り替わらない**
+  //   （画面は新しいのに中身は古い＝一番気づきにくい壊れ方）。
+  //   世代印を置いて、切替をまたいだ端末だけ1回作り直す。
+  //   ⚠️ 次に宛先を動かすときは、この文字列を必ず変える。
+  var API_GEN = "2026-08-02-cloud";
+  if (get("takahashi-api-gen") !== API_GEN) {
+    set(K_API, "");
+    set("takahashi-api-gen", API_GEN);
+  }
   API = safeApi(qs("api")) || safeApi(get(K_API)) || API_DEFAULT;
   if (KEY) set(K_KEY, KEY);
   set(K_API, API);   // 保存するのは検証を通った値だけ
