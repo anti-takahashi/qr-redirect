@@ -937,8 +937,12 @@
     $("scan-shot").style.display = live ? "none" : "flex";
     $("scan-box").style.display = live ? "" : "none";
     $("scan-note").style.display = live ? "" : "none";
-    $("scan-mode").querySelector(".t").textContent =
-      live ? "撮って読み取るに切り替える" : "読み取り（動画）に切り替える";
+    // 🔴 このボタンは `.t` を持たない（小さな文字にしたときに外した）。
+    //    ここで `.querySelector(".t")` を触ると **null に textContent を入れて例外**になり、
+    //    `startScan` が最後まで進まない＝**QRを読むボタンが完全に無反応**になる
+    //    （2026-08-02、オーナーが2回報告。ブラウザで実際に押して初めて分かった）。
+    //    ⚠️ 見た目を変えたら、その要素を触っている場所を必ず追うこと。
+    $("scan-mode").textContent = live ? "撮って読み取るに切り替える" : "今回だけ切り替える";
   }
 
   // 撮った写真から読む。
