@@ -479,7 +479,10 @@
   //   **遷移は同じ書き換えを受ける**ので、その端末ではログインできないままだった。
   //   → 先に doPost で認可URLを受け取り、**LINEへ直接**飛ぶ（GASを一度も踏まない）。
   //   ⚠️ 取れなかったときは今までどおりGASへ遷移する（動いている道は塞がない）。
-  $("login").href = API + "?action=lineLoginStart";
+  // 🔴 API は既に `?authuser=0` を持っている。`?` を2つ続けると
+  //    `authuser=0?action=lineLoginStart` という1つの値になり、**action が届かない**。
+  //    ここは逃げ道なので、普段は気づけない（2026-08-02に読んで見つけた）。
+  $("login").href = API + "&action=lineLoginStart";
   $("login").addEventListener("click", function (ev) {
     if (ev.defaultPrevented) return;
     ev.preventDefault();
