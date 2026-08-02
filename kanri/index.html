@@ -2407,12 +2407,19 @@
 
   /// 直してよい列。🔴 ここに無い列は画面に出さない。
   ///   出す＝直せると見えることなので、直せない列を並べると「保存できない画面」になる。
+  // 🔴 ここに並べてよいのは、**受け口が本当に書ける列**だけ
+  //    （`writes.rs` の `MASTER_EDITABLE_FIELDS`）。載せるだけ載せると、
+  //    直したつもりで一度も保存されない列ができる。
+  // ⚠️ `店頭価格` だけは別扱い。値付けは専用の口（`storeChangePrice`）が持っていて、
+  //    そちらは位の関所と判断ログを通る。ここから項目更新で書かない（下の保存を見ること）。
   var EDIT_FIELDS = [
     ["商品名", "text"],
     ["カテゴリ", "select"],
     ["保管場所", "text"],
     ["店頭価格", "number"],
     ["採寸", "text"],
+    ["発送サイズ区分", "text"],
+    ["概要(商品説明)", "textarea"],
     ["状態メモ", "textarea"],
     ["補足・訂正メモ(人間)", "textarea"]
   ];
@@ -2437,7 +2444,13 @@
 
   function editRender(masterId, d) {
     var rev = d["更新バージョン"];
-    var h = '<div class="card"><h2>' + esc(d["商品名"] || masterId) + "</h2>" +
+    // 🔴【2026-08-02・オーナー実機「プレビューここもありません」】
+    //    現物を手に持って直す画面なのに、写真が1枚も出ていなかった。
+    //    ⚠️ 後追いで入れる（項目の表示を写真で待たせない）。
+    var h = '<div class="card">' +
+            '<img id="edt-th" alt="" style="display:none; width:100%; max-height:240px;' +
+            'object-fit:contain; border-radius:12px; background:#efe9de; margin-bottom:12px;">' +
+            "<h2>" + esc(d["商品名"] || masterId) + "</h2>" +
             '<div class="sub" style="margin-bottom:10px;">' + esc(masterId) +
             "　" + esc(d["在庫ステータス"] || "") + "</div>";
     for (var i = 0; i < EDIT_FIELDS.length; i++) {
@@ -2471,6 +2484,15 @@
          '<div class="msg" id="edt-save-msg"></div></div>';
     $("edt-detail").innerHTML = h;
 
+    // 写真は1枚を大きく出すので px を上げる（一覧は既定のまま＝軽さを保つ）
+    call("getPricingThumbnails", { masterIds: [masterId], px: 800 }).then(function (map) {
+      var url = map && map[masterId];
+      var im = $("edt-th");
+      if (!im || !url) return;
+      im.onload = function () { im.style.display = ""; };
+      im.src = url;
+    }).catch(function () { /* 写真が出なくても項目は直せる（行き止まりにしない） */ });
+
     $("edt-save").addEventListener("click", function () {
       var m = $("edt-save-msg");
       var patch = { __expectedRev: rev };
@@ -2485,10 +2507,47 @@
         //    自分が読んだ古い値で上書きしてしまう。
         if (now !== was) { patch[nm] = now; changed += 1; }
       }
-      if (!changed) { m.className = "msg"; m.textContent = "変わっていません。"; return; }
+      // 🔴【2026-08-02】`店頭価格` は項目更新では**書けない**（受け口が受け付けない）。
+      //    ここに混ぜたままだと「保存しました」と出るのに値段だけ変わらない。
+      //    値付けの専用口へ回す（位の関所と判断ログを通る、正しい道）。
+      var newPrice = null;
+      if (Object.prototype.hasOwnProperty.call(patch, "店頭価格")) {
+        newPrice = Number(patch["店頭価格"] || 0);
+        delete patch["店頭価格"];
+        changed -= 1;
+      }
+      if (!changed && newPrice === null) {
+        m.className = "msg"; m.textContent = "変わっていません。"; return;
+      }
       $("edt-save").disabled = true;
       m.className = "msg"; m.textContent = "保存しています…";
-      call("updateProductFields", { masterId: masterId, patch: patch }).then(function (r) {
+
+      var priceStep = (newPrice === null) ? Promise.resolve(null)
+        : call("storeChangePrice", { masterId: masterId, price: newPrice, expectedRev: rev })
+            .then(function (r2) {
+              // 値段を書くと版数が上がる。**続く項目更新へ新しい版数を渡す**
+              if (r2 && r2.rev != null) { rev = r2.rev; patch.__expectedRev = r2.rev; }
+              return r2;
+            });
+
+      priceStep.then(function (pr) {
+        if (!changed) {
+          // 値段だけ直した場合
+          $("edt-save").disabled = false;
+          m.className = (pr && pr.proposal) ? "msg" : "msg ok";
+          m.textContent = (pr && pr.proposal)
+            ? String(pr.message || "オーナーの判断があるため、仮案として送りました。")
+            : "ねだんを直しました。";
+          var kept = m.textContent, keptC = m.className;
+          editOpen(masterId, undefined, function () {
+            var m3 = $("edt-save-msg");
+            if (m3) { m3.className = keptC; m3.textContent = kept; }
+          });
+          return null;
+        }
+        return call("updateProductFields", { masterId: masterId, patch: patch });
+      }).then(function (r) {
+        if (r === null) return;   // 値段だけの分岐は上で終わっている
         // 🔴【2026-08-01・Codex監査2】**送った件数ではなく、サーバが保存した件数**を出す。
         //   GASは EDITABLE_FIELDS に無い列を例外にせず黙って捨てる。送信件数を数えて
         //   「3か所を保存しました。」と出していたので、実際には1つも書かれていなくても
