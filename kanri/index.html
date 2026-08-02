@@ -315,14 +315,27 @@
     </div>
   </section>
 
+  <!-- 🔴【2026-08-02・オーナー「このページに行かないと新規登録ってできないですか？
+       他の項目はページ移動不要ですが」】ここで完結させる。
+       別ページ（/quickreg/）へ飛ばしていたのは、以前この画面がGASのiframeの中にあり
+       **iframeではカメラが塞がれた**から。いまは自社ドメインの普通のページなので、
+       分ける理由が無くなった。
+       ⚠️ /quickreg/ は残す。手伝いにURLだけ渡して使ってもらう道と、
+          OSカメラが写真を返さない端末（ページ内カメラが要る）の逃げ道。 -->
   <section class="view" id="v-quickreg">
     <div class="card">
       <h2>QRを貼って登録する</h2>
-      <div class="msg" id="qr-msg">準備しています…</div>
-      <button class="btn primary" id="qr-retry" type="button" style="margin-top:12px;">
-        <span class="t">もう一度ためす</span>
-      </button>
+      <label class="f">
+        <span>QRを読むか、ラベルの番号（T-00123）を入れる</span>
+        <input type="text" id="qr-input" autocomplete="off" autocapitalize="off"
+               spellcheck="false" placeholder="T-00123">
+      </label>
+      <button class="btn" id="qr-scan" type="button" style="min-height:56px;">
+        <span class="t" style="text-align:center;">QRを読む</span></button>
+      <button class="btn primary" id="qr-go" type="button"><span class="t">確かめる</span></button>
+      <div class="msg" id="qr-msg"></div>
     </div>
+    <div id="qr-form"></div>
   </section>
   <!-- 売上を入れる: QRを続けて読んで「かご」に貯め、まとめて会計する -->
   <section class="view" id="v-sale">
@@ -607,7 +620,6 @@
         var name = b.getAttribute("data-go");
         // 🔴 QR登録だけは**画面を出さずに飛ぶ**（用意が済んでいれば1タップ）。
         //    間に合っていないときだけ画面を出して、何が起きているかを見せる。
-        if (name === "quickreg") { openQuickReg(); return; }
         go(name);
         // 開いたときに読む処理（画面ごと）。
         // 🔴 ここを**画面を出す1か所**にまとめる。あちこちで読むと、
@@ -1097,74 +1109,200 @@
       }
       API_REJECTED = false;
     }
-    prefetchQuickReg();   // 押した瞬間に飛べるよう、裏で用意しておく
   }
 
   // ==========================================================================
-  // QRを貼って登録する（/quickreg/ へ渡す）
+  // QRを貼って登録する（**この画面で完結する**）
   //
-  // 🔴 作り直さない。/quickreg/ は既に自社ドメインで動いていて、
-  //    **端末ごとのカメラの癖**（Galaxy=OSカメラ可／Oppo=ページ内カメラ必須）まで
-  //    解決済み。ここへ持ち込むと、その苦労をやり直すことになる。
+  // 🔴【2026-08-02・オーナー】以前は /quickreg/ へ飛ばしていた。
+  //    分けていた理由は、この画面がGASのiframeの中にあり**カメラが塞がれた**から。
+  //    いまは自社ドメインの普通のページなので、その理由は消えた。
+  //    ＝**ページ移動をやめる**（他の項目と同じ扱いにする）。
   //
-  // 🔴 移動は1回だけ残る。だが実測で **98KB / 0.27秒**（同じドメイン内）。
-  //    いままで挟んでいたGASは 240KB / 1.62秒 だったので、**6倍速い**。
-  //    しかもGoogleの注意表示もログインのやり直しも無い。
+  // ⚠️ /quickreg/ は残す。2つの役目がある:
+  //    ① 手伝いにURLだけ渡して使ってもらう（鍵を渡さずに登録だけ頼める）
+  //    ② **OSカメラが写真を返さない端末**（Oppo等）の逃げ道＝向こうはページ内カメラを持つ
+  //    memory `project_qr_quickreg_device_compat`
   //
-  //    ⚠️ 押してからトークンを取ると「準備しています…」を挟むことになる（今までの形）。
-  //    ホームを出した時点で裏で取っておき、**押した瞬間に飛ぶ**ようにする。
+  // 流れ: QRを読む → 未使用のラベルなら → 写真・商品名・カテゴリ・保管場所 → 登録
   // ==========================================================================
-  var QR_PRE = { url: "", expMs: 0, getting: false };
-  var QR_MIN_REMAIN_MS = 10 * 60 * 1000;   // 残り10分を切ったら取り直す（棚の前で切れないように）
+  var REG = { masterId: "", photos: [], uploading: false };
 
-  function prefetchQuickReg() {
-    if (QR_PRE.getting) return;
-    if (QR_PRE.url && Date.now() < QR_PRE.expMs - QR_MIN_REMAIN_MS) return;
-    QR_PRE.getting = true;
-    call("issueQuickRegToken", {}).then(function (r) {
-      QR_PRE.url = (r && r.url) || "";
-      QR_PRE.expMs = (r && r.expMs) || (Date.now() + 30 * 60 * 1000);
-    }).catch(function () {
-      // 🔴 ここは黙って落ちてよい（押した時にもう一度取るので、行き止まりにはならない）。
-      //    ただし押した時の失敗は**必ず画面に出す**（下）。
-      QR_PRE.url = "";
-    }).finally(function () { QR_PRE.getting = false; });
+  function regReset() {
+    REG = { masterId: "", photos: [], uploading: false };
+    $("qr-form").innerHTML = "";
   }
 
-  // 🔴【2026-08-01・オーナー実機】ここは **同じタブ** で /quickreg/ へ行く。
-  //   向こうの「このタブを閉じて管理画面へ戻る」は別タブ前提の作りなので、
-  //   閉じるタブが無く**行き止まり**になっていた。戻り先を渡して、戻れるようにする。
-  //   ⚠️ 渡すのは合図（back=kanri）だけ。URLをそのまま渡すと、向こうを踏み台にして
-  //      よそへ飛ばせるようになる（受け側も決め打ちの行き先しか受け付けない）。
+  function regGo() {
+    var raw = String($("qr-input").value || "").trim();
+    var msg = $("qr-msg");
+    if (!raw) { msg.className = "msg err"; msg.textContent = "QRを読むか、番号を入れてください。"; return; }
+    msg.className = "msg"; msg.textContent = "確かめています…";
+    $("qr-form").innerHTML = "";
+    call("resolvePreissueToken", { rawText: raw }).then(function (r) {
+      if (!r) { msg.className = "msg err"; msg.textContent = "このラベルは読めませんでした。"; return; }
+      var st = r.status || "";
+      if (st === "registered") {
+        // 🔴 二重登録の入口を作らない。既に使われているラベルはここで止める。
+        msg.className = "msg err";
+        msg.textContent = (r.masterId || "") + " は登録済みです。別のラベルを使ってください。";
+        return;
+      }
+      if (st !== "unused") {
+        msg.className = "msg err";
+        msg.textContent = "このラベルは使えません（" + esc(st || "状態が分かりません") + "）。";
+        return;
+      }
+      msg.className = "msg ok";
+      msg.textContent = r.masterId + " に登録します。";
+      regRender(r.masterId);
+    }).catch(function (e) {
+      msg.className = "msg err"; msg.textContent = e.message;
+    });
+  }
+
+  function regRender(masterId) {
+    REG = { masterId: masterId, photos: [], uploading: false };
+    ensureCategoryOptions().then(function (opts) {
+      opts = opts || [];
+      var o = '<option value="">（選んでください）</option>';
+      for (var i = 0; i < opts.length; i++) o += "<option>" + esc(String(opts[i])) + "</option>";
+      $("qr-form").innerHTML =
+        '<div class="card"><h2>' + esc(masterId) + "</h2>" +
+        // 🔴 写真が先。棚の前では**撮ってから**名前を考える（現物を見ながら書ける）。
+        '<div class="sub" style="margin-bottom:8px;">写真（1枚以上）</div>' +
+        '<input id="reg-file" type="file" accept="image/*" capture="environment" multiple ' +
+        'style="position:absolute;width:1px;height:1px;opacity:0;">' +
+        '<button class="btn" id="reg-photo" type="button">' +
+        '<span class="t">写真を撮る</span></button>' +
+        '<div id="reg-thumbs" style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;"></div>' +
+        '<div class="msg" id="reg-photo-msg"></div>' +
+        '<label class="f"><span>商品名</span>' +
+        '<input type="text" id="reg-name" autocomplete="off"></label>' +
+        '<label class="f"><span>カテゴリ</span>' +
+        '<select id="reg-cat" class="input" style="width:100%;min-height:52px;">' + o + "</select></label>" +
+        '<label class="f"><span>保管場所</span>' +
+        '<input type="text" id="reg-loc" autocomplete="off" placeholder="店舗 / 倉庫 など"></label>' +
+        '<button class="btn primary" id="reg-save" type="button">' +
+        '<span class="t">登録する</span></button>' +
+        '<div class="msg" id="reg-msg"></div>' +
+        // ⚠️ 端末によってはOSカメラが写真を返さない。行き止まりにしない。
+        '<div class="sub" style="margin-top:12px;">' +
+        '写真が返ってこない端末では、<a id="reg-alt" href="#">別ページの登録</a>を使ってください。' +
+        "</div></div>";
+
+      $("reg-photo").addEventListener("click", function () { $("reg-file").click(); });
+      $("reg-file").addEventListener("change", function () {
+        var files = Array.prototype.slice.call(this.files || []);
+        this.value = "";
+        if (files.length) regUpload(files);
+      });
+      $("reg-save").addEventListener("click", regSave);
+      $("reg-alt").addEventListener("click", function (ev) {
+        ev.preventDefault();
+        var m = $("reg-msg");
+        m.className = "msg"; m.textContent = "登録ページを用意しています…";
+        call("issueQuickRegToken", {}).then(function (r) {
+          if (r && r.url) { location.href = withBack(r.url); return; }
+          m.className = "msg err"; m.textContent = "登録ページのURLを受け取れませんでした。";
+        }).catch(function (e) { m.className = "msg err"; m.textContent = e.message; });
+      });
+    });
+  }
+
+  // 写真を送る。**1枚ずつ順に**（まとめて投げると、途中で落ちた時に何が入ったか分からない）。
+  function regUpload(files) {
+    if (REG.uploading) return;
+    REG.uploading = true;
+    var m = $("reg-photo-msg");
+    var mid = REG.masterId;
+    var done = 0, failed = 0;
+    m.className = "msg"; m.textContent = "送っています… 0/" + files.length;
+    (function next(i) {
+      if (i >= files.length) {
+        REG.uploading = false;
+        m.className = failed ? "msg err" : "msg ok";
+        m.textContent = failed
+          ? done + "枚を入れました（" + failed + "枚は入りませんでした）。"
+          : done + "枚を入れました。";
+        return;
+      }
+      var fr = new FileReader();
+      fr.onload = function () {
+        var url = String(fr.result || "");
+        call("uploadProductImage", {
+          masterId: mid,
+          // ⚠️ 同じ名前は受け口が断る。時刻と番号を付けて重ならないようにする
+          fileName: "p-" + Date.now() + "-" + i + nameExt(files[i].name),
+          dataBase64: url
+        }).then(function () {
+          done += 1;
+          REG.photos.push(url);
+          // 🔴 入った写真を**その場で見せる**。何枚入ったかを数字だけで言わない
+          //    （棚の前では「本当に撮れたのか」が一番の不安）。
+          var t = document.createElement("img");
+          t.src = url;
+          t.style.cssText = "width:64px;height:64px;object-fit:cover;border-radius:8px;background:#efe9de;";
+          $("reg-thumbs").appendChild(t);
+        }).catch(function () { failed += 1; })
+          .finally(function () {
+            m.textContent = "送っています… " + (done + failed) + "/" + files.length;
+            next(i + 1);
+          });
+      };
+      fr.onerror = function () { failed += 1; next(i + 1); };
+      fr.readAsDataURL(files[i]);
+    })(0);
+  }
+
+  function regSave() {
+    var m = $("reg-msg");
+    if (REG.uploading) { m.className = "msg err"; m.textContent = "写真を送り終えるまで待ってください。"; return; }
+    if (!REG.photos.length) { m.className = "msg err"; m.textContent = "写真を1枚以上撮ってください。"; return; }
+    var name = String($("reg-name").value || "").trim();
+    var loc = String($("reg-loc").value || "").trim();
+    if (!name) { m.className = "msg err"; m.textContent = "商品名を入れてください。"; return; }
+    if (!loc) { m.className = "msg err"; m.textContent = "保管場所を入れてください。"; return; }
+    $("reg-save").disabled = true;
+    m.className = "msg"; m.textContent = "登録しています…";
+    call("registerProduct", {
+      masterId: REG.masterId,
+      name: name,
+      category: String($("reg-cat").value || ""),
+      storageLocation: loc
+    }).then(function () {
+      // 🔴 続けて登録できるようにする（棚の前では何点も続く）。
+      $("qr-msg").className = "msg ok";
+      $("qr-msg").textContent = REG.masterId + " を登録しました。次のQRをどうぞ。";
+      $("qr-input").value = "";
+      regReset();
+      $("qr-input").focus();
+    }).catch(function (e) {
+      $("reg-save").disabled = false;
+      m.className = "msg err"; m.textContent = e.message;
+    });
+  }
+
+  $("qr-go").addEventListener("click", regGo);
+  $("qr-input").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); regGo(); }
+  });
+  $("qr-scan").addEventListener("click", function () {
+    startScan(function (text) { $("qr-input").value = text; regGo(); });
+  });
+  ONSHOW["quickreg"] = function () {
+    regReset();
+    $("qr-msg").textContent = "";
+    setTimeout(function () { $("qr-input").focus(); }, 60);
+  };
+
+  // 別ページの登録へ渡すときの戻り先。
+  // ⚠️ 渡すのは合図（back=kanri）だけ。URLをそのまま渡すと、向こうを踏み台にして
+  //    よそへ飛ばせるようになる。
   function withBack(url) {
     if (!url) return url;
     return url + (url.indexOf("?") === -1 ? "?" : "&") + "back=kanri";
   }
-
-  function openQuickReg() {
-    // 用意が済んでいれば、画面を出さずにそのまま飛ぶ（1タップ）
-    if (QR_PRE.url && Date.now() < QR_PRE.expMs - QR_MIN_REMAIN_MS) {
-      location.href = withBack(QR_PRE.url);
-      return;
-    }
-    // 間に合っていないときだけ画面を出す＝待たされている理由が見える
-    go("quickreg");
-    var msg = $("qr-msg");
-    msg.className = "msg";
-    msg.textContent = "準備しています…";
-    call("issueQuickRegToken", {}).then(function (r) {
-      if (r && r.url) { location.href = withBack(r.url); return; }
-      msg.className = "msg err";
-      msg.textContent = "登録ページのURLを受け取れませんでした。もう一度お試しください。";
-    }).catch(function (e) {
-      msg.className = "msg err";
-      msg.textContent = e.message;
-    });
-  }
-  $("qr-retry").addEventListener("click", function () {
-    QR_PRE.url = "";           // 覚えている古いURLを捨ててから取り直す
-    openQuickReg();
-  });
 
   // ==========================================================================
   // 売上を入れる
