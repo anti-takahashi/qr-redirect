@@ -1523,12 +1523,13 @@
           im.src = url;
           return true;
         };
-        call("getPricingThumbnails", { masterIds: [mid], cacheOnly: true }).then(function (map) {
-          if (put(map && map[mid])) return;
-          if (isStale("sch", mySeq)) return;
-          return call("getPricingThumbnails", { masterIds: [mid] }).then(function (m2) {
-            put(m2 && m2[mid]);
-          });
+        // 🔴【2026-08-02・オーナー実機「画質がだいぶ下がった」】
+        //   ここは**1枚を画面いっぱい**（幅100%・高さ280px）に出す場所。
+        //   一覧と同じ小さい写真をそのまま引き伸ばすと必ずぼやける。
+        //   px を指定して**この画面だけ**大きいものをもらう（一覧は既定のまま＝軽さを保つ）。
+        // ⚠️ 一度に来るのは1枚なので、大きくしても待ち時間は増えない。
+        call("getPricingThumbnails", { masterIds: [mid], px: 800 }).then(function (map) {
+          put(map && map[mid]);
         }).catch(function () { /* 写真が出なくても補足は書ける（行き止まりにしない） */ });
       })(masterId, seq);
 
