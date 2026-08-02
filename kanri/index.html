@@ -939,6 +939,9 @@
   // ⚠️ 読めなかったときに黙らない。撮り方（近づく・明るく）まで書く。
   function scanFromFile(file) {
     if (!file) return;
+    // ここで初めて出す（撮る方は、カメラを閉じただけでは何も残らない）
+    $("scan-overlay").className = "on";
+    $("scan-overlay").setAttribute("aria-hidden", "false");
     scanMsg("読み取っています…", "");
     loadQrLib().then(function () {
       var one = new Html5Qrcode("scan-box", false);
@@ -1007,16 +1010,15 @@
   function startScan(onDone) {
     if (scanStarting || scanner) return;
     scanOnDone = onDone;
-    $("scan-overlay").className = "on";
-    $("scan-overlay").setAttribute("aria-hidden", "false");
     scanMsg("", "");
     applyScanMode();
-    // 🔴【2026-08-02・オーナー実機「この1ステップなくしてください。既定した意味がない」】
-    //   既定を「撮る」にしたのに、そこからもう一度「カメラで撮る」を押させていた。
-    //   押したその流れで端末のカメラを開く。
-    //   ⚠️ iOSは**利用者の操作の中でしか**カメラを開けない。ここは押した直後の同期処理なので通る。
-    //      この行より前で通信や待ちを挟むと開かなくなる。
+    // 🔴【2026-08-02・オーナー実機「QR新規登録のこの画面残ってます」】
+    //    撮る方は**この黒い画面を出さない**。出すと、端末のカメラを閉じた瞬間に
+    //    「もう一度撮る」だけの画面が残り、何をすればよいか分からなくなる。
+    //    写真が返ってきてから初めて出す（＝読み取り中とその結果を見せるためだけに使う）。
     if (scanMode() === "shot") { $("scan-file").click(); return; }
+    $("scan-overlay").className = "on";
+    $("scan-overlay").setAttribute("aria-hidden", "false");
     startLiveScan();
   }
 
@@ -1127,21 +1129,29 @@
   // 流れ: QRを読む → 未使用のラベルなら → 写真・商品名・カテゴリ・保管場所 → 登録
   // ==========================================================================
   var REG = { masterId: "", photos: [], uploading: false };
+  var K_REG_LOC = "takahashi-reg-loc";   // 前回の保管場所（この端末だけ）
 
   function regReset() {
     REG = { masterId: "", photos: [], uploading: false };
     $("qr-form").innerHTML = "";
   }
 
-  function regGo() {
-    var raw = String($("qr-input").value || "").trim();
+  function regGo(rawFromScan) {
+    // QRから来たときは、画面の入力欄ではなく**読めた文字**を使う
+    //（入力欄には「読み取りました…」を出しているだけ）。
+    var raw = String(rawFromScan || $("qr-input").value || "").trim();
     var msg = $("qr-msg");
-    if (!raw) { msg.className = "msg err"; msg.textContent = "QRを読むか、番号を入れてください。"; return; }
+    if (!raw || raw === "読み取りました…") {
+      msg.className = "msg err"; msg.textContent = "QRを読むか、番号を入れてください。";
+      $("qr-input").value = "";
+      return;
+    }
     msg.className = "msg"; msg.textContent = "確かめています…";
     $("qr-form").innerHTML = "";
     call("resolvePreissueToken", { rawText: raw }).then(function (r) {
       if (!r) { msg.className = "msg err"; msg.textContent = "このラベルは読めませんでした。"; return; }
       var st = r.status || "";
+      if (r.masterId) $("qr-input").value = r.masterId;   // 何を読んだかを必ず見せる
       if (st === "registered") {
         // 🔴 二重登録の入口を作らない。既に使われているラベルはここで止める。
         msg.className = "msg err";
@@ -1170,6 +1180,18 @@
     //       ここで呼ぶと、代表(父)の端末では**フォームが最後まで出ない**。
     //    ⚠️ 「揃えたいから」で選択肢を店舗モードへ開けない（許可の範囲を広げる話になる）。
     (function () {
+      // 保管場所の選択肢。⚠️ 正は /quickreg/ の同じ並び（見え方を変えない）
+      var LOCS = ["店舗", "店舗2階", "ガレージ", "有楽町"];
+      var lastLoc = get(K_REG_LOC) || "店舗";
+      var locOpts = "";
+      for (var li = 0; li < LOCS.length; li++) {
+        locOpts += '<option' + (LOCS[li] === lastLoc ? " selected" : "") + ">" +
+                   esc(LOCS[li]) + "</option>";
+      }
+      // 🔴 覚えている場所が選択肢に無いとき、黙って落とさない
+      if (LOCS.indexOf(lastLoc) === -1) {
+        locOpts = '<option selected>' + esc(lastLoc) + "</option>" + locOpts;
+      }
       $("qr-form").innerHTML =
         '<div class="card"><h2>' + esc(masterId) + "</h2>" +
         // 🔴 写真が先。棚の前では**撮ってから**名前を考える（現物を見ながら書ける）。
@@ -1180,10 +1202,20 @@
         '<span class="t">写真を撮る</span></button>' +
         '<div id="reg-thumbs" style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;"></div>' +
         '<div class="msg" id="reg-photo-msg"></div>' +
-        '<label class="f"><span>商品名</span>' +
-        '<input type="text" id="reg-name" autocomplete="off"></label>' +
+        // 🔴 並びは 写真 → 値段 → 補足 → 保管場所（既存の /quickreg/ と同じ）。
+        //    毎回触るものを上へ、触らないものを下へ（オーナー指示 2026-07-30）。
+        // 🔴 商品名は聞かない。棚の前で名前を考えるより、写真を残して先へ進む方が確実。
+        '<label class="f"><span>値段（円・任意）</span>' +
+        '<input type="number" id="reg-price" inputmode="numeric" min="1" ' +
+        'placeholder="例: 7800（空欄でも登録できます）"></label>' +
+        '<label class="f"><span>補足メモ（任意）</span>' +
+        '<textarea id="reg-note" rows="3" style="width:100%;min-height:88px;padding:10px 12px;' +
+        'border:1px solid var(--line);border-radius:12px;font:inherit;background:#fff;' +
+        'color:var(--fg);" placeholder="傷・サイズ・正しい商品名など"></textarea></label>' +
+        // 🔴 保管場所は**選択式**。既定は「店舗」で、前回選んだ場所を引き継ぐ
+        //    （毎回同じ場所を打たせない。オーナー指示 2026-08-02）。
         '<label class="f"><span>保管場所</span>' +
-        '<input type="text" id="reg-loc" autocomplete="off" placeholder="店舗 / 倉庫 など"></label>' +
+        '<select id="reg-loc" class="input" style="width:100%;min-height:52px;">' + locOpts + "</select></label>" +
         '<button class="btn primary" id="reg-save" type="button">' +
         '<span class="t">登録する</span></button>' +
         '<div class="msg" id="reg-msg"></div>' +
@@ -1260,19 +1292,27 @@
     var m = $("reg-msg");
     if (REG.uploading) { m.className = "msg err"; m.textContent = "写真を送り終えるまで待ってください。"; return; }
     if (!REG.photos.length) { m.className = "msg err"; m.textContent = "写真を1枚以上撮ってください。"; return; }
-    var name = String($("reg-name").value || "").trim();
     var loc = String($("reg-loc").value || "").trim();
-    if (!name) { m.className = "msg err"; m.textContent = "商品名を入れてください。"; return; }
-    if (!loc) { m.className = "msg err"; m.textContent = "保管場所を入れてください。"; return; }
+    if (!loc) { m.className = "msg err"; m.textContent = "保管場所を選んでください。"; return; }
+    var price = String($("reg-price").value || "").trim();
+    if (price && !(Number(price) >= 1)) {
+      m.className = "msg err"; m.textContent = "ねだんを正しく入れてください（空欄でもかまいません）。";
+      return;
+    }
     $("reg-save").disabled = true;
     m.className = "msg"; m.textContent = "登録しています…";
     call("registerProduct", {
       masterId: REG.masterId,
-      name: name,
-      // カテゴリは空で登録する（上の理由）。あとから管理モードで入れる。
+      // 商品名とカテゴリは空で登録する（上の理由）。あとから管理モードで入れる。
+      name: "",
       category: "",
-      storageLocation: loc
+      storageLocation: loc,
+      price: price,
+      correctionNote: String($("reg-note").value || "")
     }).then(function () {
+      // 🔴 保管場所だけ覚える。値段と補足は**品ごとに必ず空から**
+      //    （前回の値が次の品に付くと、間違いが黙って増える）。
+      set(K_REG_LOC, loc);
       // 🔴 続けて登録できるようにする（棚の前では何点も続く）。
       $("qr-msg").className = "msg ok";
       $("qr-msg").textContent = REG.masterId + " を登録しました。次のQRをどうぞ。";
@@ -1290,7 +1330,9 @@
     if (e.key === "Enter") { e.preventDefault(); regGo(); }
   });
   $("qr-scan").addEventListener("click", function () {
-    startScan(function (text) { $("qr-input").value = text; regGo(); });
+    // ⚠️ URLをそのまま入れない（何を読んだのか分からなくなる）。
+    //    ここは `regGo` が解いた結果でIDに置き換える（下）。
+    startScan(function (text) { $("qr-input").value = "読み取りました…"; regGo(text); });
   });
   ONSHOW["quickreg"] = function () {
     regReset();
@@ -1878,8 +1920,17 @@
     b.addEventListener("click", function () {
       startScan(function (text) {
         var el = $(t[1]);
-        if (el) el.value = text;
-        t[2]();
+        if (!el) return;
+        // 🔴【2026-08-02・オーナー実機「QR読んだあとにここにURLが入ってしまう」】
+        //   QRに入っているのは長いURL。そのまま入れると、何を読んだのか
+        //   人には分からず、打ち直すこともできない。**商品IDに直してから**入れる。
+        //   ⚠️ 直せなかったときは読めた文字を残す（消すと手掛かりが無くなる）。
+        el.value = "読み取りました…";
+        call("resolveScanToMasterId", { rawText: text }).then(function (id) {
+          el.value = id || text;
+        }).catch(function () {
+          el.value = text;
+        }).finally(function () { t[2](); });
       });
     });
   });
