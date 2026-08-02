@@ -852,8 +852,10 @@
       var favOn = FAVS[String(masterId)] === true;   // 一覧と同じ拠り所を使う（詳細も favorited を返さない）
       h += '<button type="button" class="btn" id="d-fav" data-id="' + esc(masterId) + '" style="margin-top:14px;">' +
            (favOn ? "♥ お気に入りに入っています" : "♡ お気に入りに入れる") + "</button>";
-      h += '<p class="sub" style="margin-top:10px;">' +
-           "一点ものです。店頭でも販売しているため、ご来店時にお売り切れの場合があります。</p>";
+      // 🔴【2026-08-02・オーナー】「一点ものです」の一文を外した。
+      //    **一点物でない品もある**ので、全部に付けると嘘になる。
+      //    ⚠️ 「店頭でも売っている」ことを伝える必要が出たら、
+      //       全件に貼るのではなく**その品の状態から**出すこと。
       h += "</div>";
       $("detail").innerHTML = h;
       var zs = $("detail").querySelectorAll(".zoomable");
