@@ -318,6 +318,13 @@
   //    `authuser=0` を明示すると、その書き換えが起きない。カタログは匿名で開ける設定なので
   //    どのアカウントに当たるかは関係ない。
   //    ⚠️ **個別に付け足す形にしない。** 付け忘れた1本が、客にとっては行き止まりになる。
+  // 🔴【2026-08-02】会員カタログは**自前の画面**へ移った（GASの `?view=members` ではない）。
+  //    ここを直さないと、押した客は**古い方**に入り、お気に入りが
+  //    もう誰も読まないシートへ書かれる（本人には入ったように見える）＝一番たちの悪い形。
+  //    ⚠️ GASの会員カタログ自体はまだ生きている。**リンクを外すのが先**で、
+  //       止めるのはその後（先に止めると、リンクを踏んだ客が行き止まりになる）。
+  var MEMBERS_URL = 'https://qr.antiquekagu-takahashi.com/members/';
+
   function gasUrl(query) {
     var q = String(query || '').replace(/^\?/, '');
     return GAS_EXEC_URL + '?authuser=0' + (q ? '&' + q : '');
@@ -441,7 +448,7 @@
   function landingHtml() {
     return '<div class="detail-panel"><div class="empty-state">' +
       '店内の商品につけられた<strong>QRコード</strong>をカメラで読み取ると、その商品の詳細が表示されます。<br><br>' +
-      '<a class="fav-link" href="' + escapeHtml(gasUrl('view=members')) + '">公式LINEの友だち限定カタログを見る</a>' +
+      '<a class="fav-link" href="' + escapeHtml(MEMBERS_URL) + '">公式LINEの友だち限定カタログを見る</a>' +
       '</div></div>';
   }
 
@@ -488,7 +495,7 @@
     //    説明も2行→1行。長い注意書きを常時出しても読まれず、押す場所が増えて見えるだけ。
     var favHtml =
       '<p class="fav-why">お気に入りは<b>公式LINE</b>に残るので、端末が変わっても消えません。</p>' +
-      '<a class="fav-btn" href="' + escapeHtml(gasUrl('view=members')) + '" target="_blank" rel="noopener">' +
+      '<a class="fav-btn" href="' + escapeHtml(MEMBERS_URL) + '" target="_blank" rel="noopener">' +
       '☆ お気に入り（公式LINEの会員カタログ）</a>';
 
     box.innerHTML =
