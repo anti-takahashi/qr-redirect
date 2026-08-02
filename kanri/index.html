@@ -1163,10 +1163,13 @@
 
   function regRender(masterId) {
     REG = { masterId: masterId, photos: [], uploading: false };
-    ensureCategoryOptions().then(function (opts) {
-      opts = opts || [];
-      var o = '<option value="">（選んでください）</option>';
-      for (var i = 0; i < opts.length; i++) o += "<option>" + esc(String(opts[i])) + "</option>";
+    // 🔴 カテゴリはここで聞かない。
+    //    ① 既存の /quickreg/ も聞いていない（登録は**在庫把握**が目的で、
+    //       出品向きの品を選び出してから作り込む二段構え＝memory `feedback_qr_is_inventory_first`）
+    //    ② 店舗モードは `getCategoryOptions` を呼べない（GAS側もそう）。
+    //       ここで呼ぶと、代表(父)の端末では**フォームが最後まで出ない**。
+    //    ⚠️ 「揃えたいから」で選択肢を店舗モードへ開けない（許可の範囲を広げる話になる）。
+    (function () {
       $("qr-form").innerHTML =
         '<div class="card"><h2>' + esc(masterId) + "</h2>" +
         // 🔴 写真が先。棚の前では**撮ってから**名前を考える（現物を見ながら書ける）。
@@ -1179,8 +1182,6 @@
         '<div class="msg" id="reg-photo-msg"></div>' +
         '<label class="f"><span>商品名</span>' +
         '<input type="text" id="reg-name" autocomplete="off"></label>' +
-        '<label class="f"><span>カテゴリ</span>' +
-        '<select id="reg-cat" class="input" style="width:100%;min-height:52px;">' + o + "</select></label>" +
         '<label class="f"><span>保管場所</span>' +
         '<input type="text" id="reg-loc" autocomplete="off" placeholder="店舗 / 倉庫 など"></label>' +
         '<button class="btn primary" id="reg-save" type="button">' +
@@ -1207,7 +1208,7 @@
           m.className = "msg err"; m.textContent = "登録ページのURLを受け取れませんでした。";
         }).catch(function (e) { m.className = "msg err"; m.textContent = e.message; });
       });
-    });
+    })();
   }
 
   // 写真を送る。**1枚ずつ順に**（まとめて投げると、途中で落ちた時に何が入ったか分からない）。
@@ -1268,7 +1269,8 @@
     call("registerProduct", {
       masterId: REG.masterId,
       name: name,
-      category: String($("reg-cat").value || ""),
+      // カテゴリは空で登録する（上の理由）。あとから管理モードで入れる。
+      category: "",
       storageLocation: loc
     }).then(function () {
       // 🔴 続けて登録できるようにする（棚の前では何点も続く）。
