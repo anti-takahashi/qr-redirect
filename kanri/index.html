@@ -418,7 +418,7 @@
     <div id="pri-list"></div>
   </section>
 
-  <!-- 商品一覧: 眺めて気づいたことを入れる（ねだん・ネット候補） -->
+  <!-- 商品一覧: 眺めて気づいたことを入れる（値段・ネット候補） -->
   <section class="view" id="v-list">
     <!-- 🔴【2026-08-01・オーナー指示】QR検索をここへ組み込んだ。
          現物が手元にあるなら上（QRを読む／IDを入れる）、
@@ -1306,7 +1306,7 @@
     if (!loc) { m.className = "msg err"; m.textContent = "保管場所を選んでください。"; return; }
     var price = String($("reg-price").value || "").trim();
     if (price && !(Number(price) >= 1)) {
-      m.className = "msg err"; m.textContent = "ねだんを正しく入れてください（空欄でもかまいません）。";
+      m.className = "msg err"; m.textContent = "値段を正しく入れてください（空欄でもかまいません）。";
       return;
     }
     $("reg-save").disabled = true;
@@ -2537,7 +2537,7 @@
           m.className = (pr && pr.proposal) ? "msg" : "msg ok";
           m.textContent = (pr && pr.proposal)
             ? String(pr.message || "オーナーの判断があるため、仮案として送りました。")
-            : "ねだんを直しました。";
+            : "値段を直しました。";
           var kept = m.textContent, keptC = m.className;
           editOpen(masterId, undefined, function () {
             var m3 = $("edt-save-msg");
