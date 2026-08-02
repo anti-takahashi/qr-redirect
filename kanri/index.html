@@ -808,9 +808,6 @@
   //      自前の受け口はGoogleアカウントを見ないので、この2つの落とし穴は消えた。
   var API_DEFAULT = "https://api.antiquekagu-takahashi.com/";
 
-  // 逃げ道として残してあるGAS（正本ではない＝ここへ戻すと**古い中身**が見える）
-  var API_GAS_OLD = "https://script.google.com/macros/s/" +
-    "AKfycbw2BGhgYrZujEVnpxEgkJsurAWLKD-KUZuMEuxb3ig302pBt7K1wE15a5Af3yaqCaoN/exec?authuser=0";
 
   // 🔴【2026-08-01・Fable5監査M-7】接続先は**この2本の完全一致だけ**にする。
   //   以前は「script.google.com で始まること」しか見ていなかったが、
@@ -819,10 +816,13 @@
   //   localStorage の鍵とセッションが相手の doPost へ送られる。
   //   デプロイを移すときの逃げ道は「移行先をここへ足す」形で残す（1行の追加で済む）。
   //   ⚠️ 検証は**保存より先**に行う（順番が逆だと、弾く前に書き込んでしまう）。
-  //   ⚠️【2026-08-02】GASを残したのは**切替直後の逃げ道**として。
-  //      ただし正本はもうSQLite側なので、こちらへ戻すと**古い中身**が見える。
-  //      GAS側の書き込みを止めたら、この行を消すこと（そのとき戻り道は無くなる）。
-  var API_ALLOW = [API_DEFAULT, API_GAS_OLD];
+  //   🔴【2026-08-02・夕方】GASを逃げ道として残していたが、**外した**。
+  //      GAS側の書き込みを止めた（読み取り専用にした）ので、
+  //      そちらへ戻しても**登録も会計も値付けもできない**。
+  //      繋がるのに何もできない道は、逃げ道ではなく落とし穴になる。
+  //      ⚠️ 本当に戻すときは、GASの `GAS_WRITE_FROZEN_ACTIONS_` を空にするところから。
+  //         画面の宛先だけ戻しても書けない。
+  var API_ALLOW = [API_DEFAULT];
 
   function safeApi(v) {
     return (v && API_ALLOW.indexOf(v) !== -1) ? v : "";
