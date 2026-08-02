@@ -167,6 +167,11 @@
   }
   #scan-overlay.on { display: flex; }
   #scan-box { width: 100%; max-width: 420px; border-radius: 14px; overflow: hidden; background: #000; }
+  #scan-shot { width: 100%; max-width: 420px; display: none; flex-direction: column; gap: 14px; }
+  #scan-shot-note { color: #fff; text-align: center; font-size: 16px; }
+  #scan-shot .btn { background: #fff; color: var(--fg); border-color: #fff; }
+  /* 切り替えは主役ではないので、控えめに */
+  #scan-mode { max-width: 420px; background: transparent; color: #fff; border-color: rgba(255,255,255,.5); }
   #scan-box video { width: 100%; display: block; }
   #scan-note { font-size: 15px; text-align: center; }
   #scan-overlay .msg { color: #ffd9d0; text-align: center; }
@@ -453,9 +458,21 @@
      🔴 カメラは**開いている間だけ**動かす。閉じる・別の画面へ行く・アプリを裏へ回す、
         どれでも必ず止める（端末のカメラランプが点いたままにならないように）。 -->
 <div id="scan-overlay" aria-hidden="true">
+  <!-- 🔴【2026-08-02・オーナー実機】既定は**撮影**にする。
+       「QRが小さいので撮影のほうが扱いやすい」＝店のラベルは小さく、
+       動画で合わせ続けるより、1枚撮って読ませる方が確実で速い。
+       リーダー（動画）は**任意で選べる**ようにして、端末ごとに覚える。 -->
+  <div id="scan-shot">
+    <div id="scan-shot-note">QRラベルを撮ってください</div>
+    <!-- capture=environment で背面カメラのアプリが直接開く（枠合わせが要らない） -->
+    <input id="scan-file" type="file" accept="image/*" capture="environment"
+           style="position:absolute; width:1px; height:1px; opacity:0;">
+    <button class="btn" id="scan-shot-btn" type="button"><span class="t" style="text-align:center;">カメラで撮る</span></button>
+  </div>
   <div id="scan-box"></div>
   <div id="scan-note">QRラベルを枠の中に写してください</div>
   <div id="scan-msg" class="msg"></div>
+  <button class="btn" id="scan-mode" type="button"><span class="t" style="text-align:center;">読み取り（動画）に切り替える</span></button>
   <button class="btn" id="scan-cancel" type="button"><span class="t" style="text-align:center;">やめる</span></button>
 </div>
 
@@ -855,12 +872,85 @@
       .catch(function () { try { s.clear(); } catch (e) {} });
   }
 
+  // 🔴【2026-08-02・オーナー実機】読み方は2つ。**既定は「撮る」**。
+  //   「QRが小さいので撮影のほうが扱いやすい」＝動画で小さいラベルに焦点を合わせ続けるより、
+  //   1枚撮って読ませる方が確実。動画のほうが良い端末もあるので、任意で選べるようにし、
+  //   選んだら端末に覚える（毎回選び直させない）。
+  var K_SCAN_MODE = "takahashi-scan-mode";      // "shot"（撮る・既定）/ "live"（動画）
+  function scanMode() { return get(K_SCAN_MODE) === "live" ? "live" : "shot"; }
+
+  // どちらの見た目を出すか。**カメラは動画のときしか触らない。**
+  function applyScanMode() {
+    var live = scanMode() === "live";
+    $("scan-shot").style.display = live ? "none" : "flex";
+    $("scan-box").style.display = live ? "" : "none";
+    $("scan-note").style.display = live ? "" : "none";
+    $("scan-mode").querySelector(".t").textContent =
+      live ? "撮って読み取るに切り替える" : "読み取り（動画）に切り替える";
+  }
+
+  // 撮った写真から読む。
+  // ⚠️ 読めなかったときに黙らない。撮り方（近づく・明るく）まで書く。
+  function scanFromFile(file) {
+    if (!file) return;
+    scanMsg("読み取っています…", "");
+    loadQrLib().then(function () {
+      var one = new Html5Qrcode("scan-box", false);
+      // 第2引数=false＝画像を描き出さない。描き出す指定にすると、
+      // 撮る側では隠してある #scan-box に差し込もうとして落ちる。
+      return one.scanFile(file, false).then(function (text) {
+        try { one.clear(); } catch (e) {}
+        var f = scanOnDone;
+        stopScan().then(function () { if (f) f(String(text || "")); });
+      }).catch(function () {
+        try { one.clear(); } catch (e) {}
+        scanMsg("QRを読み取れませんでした。もう少し近づいて、明るいところで撮り直してください。"
+              + "　商品ID（T-00123）の手入力でも先へ進めます。", "err");
+      });
+    }).catch(function (e) {
+      scanMsg((e && e.message) || "読み取りを用意できませんでした。", "err");
+    });
+  }
+
+  $("scan-shot-btn").addEventListener("click", function () { $("scan-file").click(); });
+  $("scan-file").addEventListener("change", function () {
+    var f = this.files && this.files[0];
+    this.value = "";            // 同じ写真をもう一度選べるように毎回空にする
+    scanFromFile(f);
+  });
+  $("scan-mode").addEventListener("click", function () {
+    var next = scanMode() === "live" ? "shot" : "live";
+    set(K_SCAN_MODE, next);
+    // 動画を出していたなら必ず止めてから切り替える（カメラを掴んだままにしない）
+    var f = scanOnDone;
+    var s = scanner;
+    scanner = null;
+    var done = s ? s.stop().then(function () { try { s.clear(); } catch (e) {} })
+                    .catch(function () { try { s.clear(); } catch (e) {} })
+                 : Promise.resolve();
+    done.then(function () {
+      scanOnDone = f;
+      scanMsg("", "");
+      applyScanMode();
+      if (next === "live") startLiveScan();
+    });
+  });
+
   function startScan(onDone) {
     if (scanStarting || scanner) return;
-    scanStarting = true;
     scanOnDone = onDone;
     $("scan-overlay").className = "on";
     $("scan-overlay").setAttribute("aria-hidden", "false");
+    scanMsg("", "");
+    applyScanMode();
+    // 🔴 撮る方はカメラを掴まない（押したときに端末のカメラが開く）
+    if (scanMode() === "shot") return;
+    startLiveScan();
+  }
+
+  function startLiveScan() {
+    if (scanStarting || scanner) return;
+    scanStarting = true;
     scanMsg("カメラを用意しています…", "");
     loadQrLib().then(function () {
       scanner = new Html5Qrcode("scan-box", false);

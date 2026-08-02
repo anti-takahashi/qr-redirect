@@ -568,8 +568,13 @@
     showFatal('開けませんでした', '必要な情報（トークン・接続先）が不足しています。管理画面の「かんたん新規登録」から開き直してください。', false);
     return;
   }
-  // 接続先はGASのexec URLのみ許可（誘導リンク偽造でよそへ写真・トークンを送らせない）
-  if (apiUrl.indexOf('https://script.google.com/') !== 0) {
+  // 接続先は**この2つだけ**（誘導リンク偽造でよそへ写真・トークンを送らせない）。
+  // 🔴【2026-08-02・クラウド移行】自前の受け口を足した。ここが `script.google.com` しか
+  //    許していなかったので、切替後の新規登録は開いた瞬間に「接続先が不正です」で止まる。
+  //    ⚠️ 前方一致ではなく**完全一致**にする（script.google.com 配下は誰でもデプロイできる）。
+  var API_OK = apiUrl === 'https://api.antiquekagu-takahashi.com/' ||
+               apiUrl.indexOf('https://script.google.com/') === 0;
+  if (!API_OK) {
     showFatal('開けませんでした', '接続先が不正です。管理画面から開き直してください。', false);
     return;
   }
@@ -580,6 +585,14 @@
     var b64 = token.split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
     tokenExpMs = Number(JSON.parse(atob(b64)).exp) || 0;
   } catch (e) { tokenExpMs = 0; }
+  // 🔴【2026-08-02】自前の受け口は `tokenId.exp.署名` の形で出す（GASはbase64のJSON）。
+  //    形が違うと上のdecodeが黙って失敗し、**残り時間が出ないだけの画面**になる。
+  //    期限そのものはサーバが見ているので危険は無いが、
+  //    「気づかないうちに表示が消える」のは残さない。
+  if (!tokenExpMs) {
+    var mid = token.split('.')[1];
+    if (/^[0-9]{10,}$/.test(mid || '')) tokenExpMs = Number(mid);
+  }
   function tickTimer() {
     if (!tokenExpMs) return;
     var el = document.getElementById('top-timer');
