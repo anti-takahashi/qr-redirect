@@ -2344,6 +2344,13 @@
       "</div>" +
       '<button type="button" class="btn lst-cand" style="margin:0;">' +
       '<span class="t">' + (r.netCand === "✓" ? "✓ ネット候補にしている" : "ネット候補にする") + "</span></button>" +
+      // 🔴【2026-08-04】写真が横倒しのときに、その場で直せるようにする。
+      //    ⚠️ 写真が無い品には出さない（押しても何も起きないボタンを並べない）。
+      //    ⚠️ 小さめ・控えめにする。判断に要るのは値段とネット候補で、これは直しの道具。
+      (r.hasPhoto
+        ? '<button type="button" class="btn lst-rot" style="margin:8px 0 0;">' +
+          '<span class="t" style="font-size:15px;">写真を回す（90度）</span></button>'
+        : "") +
       // 🔴【2026-08-01・オーナー実機】この一覧は値段とネット候補しか触れず、
       //   「実質、未値付け画面の情報が多い版」になっていた（オーナーの言葉）。
       //   タップしても何も起きず、**補足を書き足せない**。
@@ -2356,6 +2363,30 @@
     var id = c.getAttribute("data-id");
     var out = c.querySelector(".lst-r");
     function rev() { return c.getAttribute("data-rev"); }
+    // 🔴【2026-08-04】写真が横倒しで登録されることがある（T-00520/T-00394で実際に起きた）。
+    //    ⚠️ それまでは**こちらがVPSに入らないと直せなかった**＝オーナーの手が増えていた。
+    //       気づく場所（一覧）で、その場で直せるようにする。
+    //    ⚠️ 何度押しても原本は無傷（受け口が最初の1回だけ控えを取る）。
+    var rot = c.querySelector(".lst-rot");
+    if (rot) {
+      rot.addEventListener("click", function () {
+        rot.disabled = true;
+        out.className = "msg lst-r"; out.textContent = "回しています…";
+        call("rotateProductPhoto", { masterId: id }).then(function () {
+          out.className = "msg lst-r ok"; out.textContent = "回しました。";
+          // 🔴 その場で見えないと「効いたのか」が分からない。
+          //    ⚠️ 同じURLだとブラウザが古い絵を出すので、時刻を付けて取り直す。
+          var im = c.querySelector(".lst-th");
+          if (im) { im.removeAttribute("src"); }
+          call("getPricingThumbnails", { masterIds: [id], px: 148 }).then(function (map) {
+            if (im && map && map[id]) im.src = map[id];
+          }).catch(function () { /* 見え方だけの話。回したこと自体は済んでいる */ });
+        }).catch(function (e) {
+          out.className = "msg lst-r err";
+          out.textContent = "回せませんでした：" + ((e && e.message) || "");
+        }).finally(function () { rot.disabled = false; });
+      });
+    }
     c.querySelector(".lst-save").addEventListener("click", function () {
       var p = Number(c.querySelector(".lst-price").value || 0);
       if (!p || p < 1) { out.className = "msg lst-r err"; out.textContent = "値段を入れてください。"; return; }
