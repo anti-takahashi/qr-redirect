@@ -1676,10 +1676,15 @@
              "</div>" +
              '<div class="sub" style="font-size:12px; white-space:nowrap;">' +
              yen(r.soldPrice != null ? r.soldPrice : r.saleValue) + "</div>" +
-             '<button type="button" class="sale-undo" data-id="' + esc(r.masterId) + '" ' +
-             'data-sale="' + esc(r.saleId || "") + '" ' +
-             'style="min-height:44px;padding:0 10px;border:1px solid var(--line);' +
-             'border-radius:10px;background:#fff;font:inherit;font-size:13px;cursor:pointer;">戻す</button>' +
+             // 🔴 手入力の品には「戻す」を付けない。戻す口は商品IDで戻す作りで、
+             //    手入力にはIDが無い。会計ごと消す口を当てると**同じ会計の他の品まで消える**。
+             //    ⚠️ 一覧には出す（出さないと打ち漏らしに気づけない）。取消はオーナー側で行う。
+             (r.manual
+               ? '<div class="sub" style="font-size:11px; white-space:nowrap;">取消はPC版で</div>'
+               : '<button type="button" class="sale-undo" data-id="' + esc(r.masterId) + '" ' +
+                 'data-sale="' + esc(r.saleId || "") + '" ' +
+                 'style="min-height:44px;padding:0 10px;border:1px solid var(--line);' +
+                 'border-radius:10px;background:#fff;font:inherit;font-size:13px;cursor:pointer;">戻す</button>') +
              "</div>";
       }
       box.innerHTML = h;
