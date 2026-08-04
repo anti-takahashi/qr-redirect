@@ -308,6 +308,12 @@
       <button class="btn" data-go="queue">
         <span class="t">出品リスト<span class="d">いま送ってある品を見る（決めるのはPC版）</span></span>
       </button>
+      <!-- 🔴【2026-08-04】2026-07-31のオーナー依頼をここへ戻した。
+           クラウド移行のとき、この画面だけ引き継がれずに消えていた
+           （GAS側は書き込み凍結済みなので、PC版が押し出しても届かない状態だった）。 -->
+      <button class="btn" data-go="today">
+        <span class="t">今日のやり取り<span class="d">PC版の今日のタスクを見る／その場で依頼を出す</span></span>
+      </button>
     </div>
 
   </section>
@@ -513,6 +519,34 @@
     <div class="msg" id="q-msg">読み込んでいます…</div>
     <div id="q-list"></div>
   </section>
+
+  <!-- 今日のやり取り（2026-07-31 オーナー依頼・2026-08-04にクラウド側へ作り直し）
+       🔴 ここは**見る**のと**依頼を出す**だけ。タスクの状態はPC版側で持つ
+          （正本は ops/today_log.jsonl）。ここで直せるようにすると正本が2つになる。 -->
+  <section class="view" id="v-today">
+    <div class="msg" id="td-msg">読み込んでいます…</div>
+    <!-- 🔴 いつ時点の写しかを必ず出す。出さないと、PC版が落ちている間の
+         古い帳面を「今日のもの」として読んでしまう（客ではなくオーナーが誤る）。 -->
+    <p class="sub" id="td-at"></p>
+    <div id="td-list"></div>
+
+    <h2 style="font-size:18px;margin:26px 0 10px;">その場で依頼を出す</h2>
+    <p class="sub" style="margin-bottom:10px;">思いついたことをここに書けば、PC版へ届きます。</p>
+    <label class="lb" for="td-kind">種類</label>
+    <select id="td-kind">
+      <option value="依頼">依頼</option>
+      <option value="質問">質問</option>
+      <option value="不具合">不具合</option>
+      <option value="メモ">メモ</option>
+    </select>
+    <label class="lb" for="td-text">内容</label>
+    <textarea id="td-text" rows="4" placeholder="例）棚の火鉢、ネットに出したい"></textarea>
+    <label class="lb" for="td-target">商品（分かれば）</label>
+    <input id="td-target" type="text" inputmode="latin" autocapitalize="off"
+           spellcheck="false" placeholder="T-00123">
+    <button class="btn primary" id="td-send" type="button">送る</button>
+    <div class="msg" id="td-send-msg"></div>
+  </section>
 </main>
 
 <!-- QR読み取り（4画面で共用・1つだけ）。
@@ -592,7 +626,8 @@
     // 🔴【Fable5監査L-12】抜けていた4つ。ヘッダは「いまどこか」を見せる場所なので、
     //   商品管理のままだと役目を果たさない。
     "list": "商品一覧", "edit": "QRで探して直す", "netlist": "QRからネット出品",
-    "queue": "出品リスト", "offline": "つながりませんでした"
+    "queue": "出品リスト", "today": "今日のやり取り",
+    "offline": "つながりませんでした"
   };
   var stack = [];
   function show(name, push) {
@@ -3060,6 +3095,70 @@
     });
   }
   ONSHOW["queue"] = loadQueue;
+
+  // ---- 今日のやり取り（2026-07-31 オーナー依頼 → 2026-08-04にクラウド側へ作り直し）----
+  // 🔴 状態（済み／これから）は**PC版が持つ**。ここでは直せない。
+  //    直せるようにすると正本が2つになり、どちらが本当か分からなくなる。
+  function esc(v) {
+    return String(v == null ? "" : v)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  function loadToday() {
+    $("td-msg").textContent = "読み込んでいます…";
+    $("td-at").textContent = "";
+    $("td-list").innerHTML = "";
+    return call("listTodaySnapshot", {}).then(function (r) {
+      var items = (r && r.items) || [];
+      if (!items.length) {
+        // 🔴 空を「読み込み中」のまま残さない。**空だと分かる**ようにする。
+        $("td-msg").textContent = "いまは何もありません。";
+        return;
+      }
+      $("td-msg").textContent = "";
+      // 🔴 いつ時点の写しか。PC版が落ちている間は古いまま止まるので、必ず見せる。
+      $("td-at").textContent = r.at ? ("PC版 " + String(r.at).replace("T", " ").slice(0, 16) + " 時点の控えです") : "";
+      var html = "";
+      for (var i = 0; i < items.length; i++) {
+        var x = items[i];
+        var done = (x.state === "done" || x.state === "済");
+        var head = (x.kind === "ask") ? "Claudeからのお願い" : "今日のタスク";
+        html += '<div class="card"' + (done ? ' style="opacity:.55;"' : '') + '>' +
+          '<div class="sub">' + esc(head) +
+          (x.carried ? '・持ち越し' : '') +
+          (x.pri ? '・' + esc(x.pri) : '') + '</div>' +
+          '<div>' + (done ? '✅ ' : '') + esc(x.text) + '</div>' +
+          (x.note ? '<div class="sub">' + esc(x.note) + '</div>' : '') +
+          '</div>';
+      }
+      $("td-list").innerHTML = html;
+    }).catch(function (e) {
+      // 🔴 黙って空にしない。取れなかったことを書く（空と失敗は別物）。
+      $("td-msg").textContent = "読み込めませんでした：" + ((e && e.message) || "");
+    });
+  }
+  ONSHOW["today"] = loadToday;
+
+  $("td-send").addEventListener("click", function () {
+    var text = $("td-text").value.trim();
+    if (!text) { $("td-send-msg").textContent = "内容を書いてください。"; return; }
+    $("td-send").disabled = true;
+    $("td-send-msg").textContent = "送っています…";
+    call("submitTodayRequest", {
+      kind: $("td-kind").value,
+      text: text,
+      target: $("td-target").value.trim()
+    }).then(function () {
+      // 🔴 送れたことをはっきり見せる（店舗モードと同じ作法）。
+      //    ⚠️ 入力を消すのは**送れてから**。先に消すと、失敗したとき書いたものが消える。
+      $("td-text").value = "";
+      $("td-target").value = "";
+      $("td-send-msg").textContent = "送りました。PC版に届きます。";
+    }).catch(function (e) {
+      $("td-send-msg").textContent = "送れませんでした：" + ((e && e.message) || "");
+    }).then(function () {
+      $("td-send").disabled = false;
+    });
+  });
 
   ONSHOW["netlist"] = function () { setTimeout(function () { $("net-input").focus(); }, 60); };
 
