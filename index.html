@@ -495,7 +495,11 @@
     //    説明も2行→1行。長い注意書きを常時出しても読まれず、押す場所が増えて見えるだけ。
     var favHtml =
       '<p class="fav-why">お気に入りは<b>公式LINE</b>に残るので、端末が変わっても消えません。</p>' +
-      '<a class="fav-btn" href="' + escapeHtml(MEMBERS_URL) + '" target="_blank" rel="noopener">' +
+      // 🔴【2026-08-04・オーナー実機】新規タブで開かない。
+      //    別タブで開くとLINEログインもそちらで走り、タブが2枚になって
+      //    「どっちを見ればいいのか」になる。**同じタブで切り替わるのが自然**。
+      //    ⚠️ 戻りたいときはブラウザの戻るで戻れる（会員カタログ側に履歴対応済み）。
+      '<a class="fav-btn" href="' + escapeHtml(MEMBERS_URL) + '">' +
       '☆ お気に入り（公式LINEの会員カタログ）</a>';
 
     box.innerHTML =
