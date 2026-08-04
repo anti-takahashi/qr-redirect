@@ -1708,9 +1708,12 @@
             //   ＝確認まで見せておいて、一度も成功しないボタンだった。
             //   会計IDが分かるときは**会計ごと取り消す**（voidSale。店舗許可にも入っている）。
             var saleId = b.getAttribute("data-sale") || "";
+            // 🔴【2026-08-04・実害】操作IDを送っていなかったので、受け口が空を断り
+            //    **取消・戻すが一度も通っていなかった**。
+            //    ⚠️ 押すたびに新しく作る（同じキーを使い回すと2回目が「済み」で無視される）。
             var p = saleId
-              ? call("voidSale", { saleId: saleId })
-              : call("undoTodaySale", { masterId: id });
+              ? call("voidSale", { saleId: saleId, operationId: newOpId() })
+              : call("undoTodaySale", { masterId: id, operationId: newOpId() });
             p.then(function () {
               loadToday();
             }).catch(function (e) {

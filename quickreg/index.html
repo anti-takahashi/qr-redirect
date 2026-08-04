@@ -1426,7 +1426,11 @@
     document.getElementById('photo-area').appendChild(imgTag);
     var filename = currentMasterId + '_live_' + Date.now() + '.jpg';
     var upP = rpc('uploadProductImage', {
-      masterId: currentMasterId, filename: filename, base64Data: dataUrl, mimeType: 'image/jpeg'
+      // 🔴【2026-08-04・実害】鍵名が /kanri/ と違っていて、受け口が読めず
+      //    **写真が1枚も入らず、登録そのものが通らなかった**。名前を揃える。
+      //    ⚠️ 受け口も旧名を受けるようにしてある（電話に残った古い画面のため）。
+      //       だからといってここを戻さない。新しく書くときは必ずこの名前で。
+      masterId: currentMasterId, fileName: filename, dataBase64: dataUrl, mimeType: 'image/jpeg'
     });
     // 🔴 登録側が待ち合わせるための控え。**gen付きで持つ**＝別の品の登録が
     //    この写真を待ってしまう事故を防ぐ（entryGen の考え方と同じ）。
@@ -1475,7 +1479,9 @@
       category: '',
       folderUrl: currentFolderUrl,
       storageLocation: location,
-      storePrice: document.getElementById('price').value,
+      // 🔴【2026-08-04・実害】受け口は `price` を読む。`storePrice` で送っていたので
+      //    **棚の前で打った値段が黙って消えていた**（画面には何も出ない）。
+      price: document.getElementById('price').value,
       stock: '',
       dimensions: '',
       shippingSizeClass: '',
