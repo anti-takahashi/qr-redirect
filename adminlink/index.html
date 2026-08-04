@@ -76,7 +76,13 @@
     <!-- 🔴 新しい画面で詰まったときの逃げ道。小さく置く（ふだんは使わない）。
          これを消すと、何かあったとき代表(父)・手伝いが全員止まる。 -->
     <p style="margin-top:18px;">
-      <a class="ghost" id="go-old" href="#" style="font-size:14px;">これまでの管理ページをひらく</a>
+      <!-- 🔴【2026-08-04】「これまでの管理ページ」の逃げ道を**消した**。
+           旧GASの入口は移転案内だけを返すようになり、押しても
+           **この /adminlink/ へ戻ってくる輪**になっていた（行き止まりより悪い＝
+           押すたびに同じ場所をぐるぐる回る）。逃げ道が輪では逃げ道にならない。
+           困ったときの案内は下の1行で言葉にする（押せない案内は輪を作らない）。 -->
+      <p style="font-size:13px;color:#8b8377;margin-top:10px;">
+        開けないときは、オーナーに新しいアクセスキーQRを読ませてもらってください。</p>
     </p>
   </div>
 
@@ -158,10 +164,9 @@
   //   ⚠️ 旧GASの管理画面は**消さない**。新しい方で詰まったときに
   //      代表(父)・手伝いが全員止まると店が回らないので、逃げ道として下に残す。
   var ADMIN = "https://qr.antiquekagu-takahashi.com/kanri/";
-  // これまでの管理ページ（GAS）。逃げ道としてだけ使う。
-  // 🔴 こちらへ渡すときは authuser=0 が要る。無いと複数Googleアカウントの端末で
-  //    /macros/u/1/s/… へ書き換えられて404になる（2026-07-29に実測）。
-  var ADMIN_OLD = "https://script.google.com/macros/s/AKfycbw2BGhgYrZujEVnpxEgkJsurAWLKD-KUZuMEuxb3ig302pBt7K1wE15a5Af3yaqCaoN/exec";
+  // ⚠️【2026-08-04】旧GASへの逃げ道（ADMIN_OLD）は**廃止**。
+  //    旧GASの入口は移転案内（→この /adminlink/）だけを返すので、
+  //    リンクを残すと**閉ループ**になる。定数ごと消した（半端に残すと誰かがまた繋ぐ）。
 
   // 🔴 鍵は端末に覚えておき、**ホーム画面のアイコンが指すURLには載せない**。
   //    URLに載せると、画面写し・共有・履歴からそのまま漏れる。
@@ -228,18 +233,11 @@
 
   // 新しい商品管理は自社ドメインなので authuser は要らない（GASではない）。
   var target = key ? ADMIN + "?k=" + encodeURIComponent(key) : ADMIN;
-  // 🔴 逃げ道（旧GAS）にだけ authuser=0 を付ける。Googleに複数アカウントで
-  //    ログインしている端末では、これが無いと /macros/u/1/s/… へ書き換えられて404になる
-  //    （2026-07-29に実測）。**新しい方へ付けても意味が無いので付けない。**
-  var oldSep = ADMIN_OLD.indexOf("?") >= 0 ? "&" : "?";
-  var targetOld = key
-    ? ADMIN_OLD + oldSep + "authuser=0&k=" + encodeURIComponent(key)
-    : ADMIN_OLD + oldSep + "authuser=0";
+
   el("go").href = target;
   el("skip").href = target;
   el("skip-keep").href = target;
-  var oldLink = el("go-old");
-  if (oldLink) oldLink.href = targetOld;
+
   // 「追加した」を押したときだけ覚える。押さずに開いた人には次回また案内を出す。
   el("skip").addEventListener("click", function () {
     try { localStorage.setItem(ADDED_STORE, "1"); } catch (e) {}
