@@ -568,12 +568,10 @@
     showFatal('開けませんでした', '必要な情報（トークン・接続先）が不足しています。管理画面の「かんたん新規登録」から開き直してください。', false);
     return;
   }
-  // 接続先は**この2つだけ**（誘導リンク偽造でよそへ写真・トークンを送らせない）。
-  // 🔴【2026-08-02・クラウド移行】自前の受け口を足した。ここが `script.google.com` しか
-  //    許していなかったので、切替後の新規登録は開いた瞬間に「接続先が不正です」で止まる。
-  //    ⚠️ 前方一致ではなく**完全一致**にする（script.google.com 配下は誰でもデプロイできる）。
-  var API_OK = apiUrl === 'https://api.antiquekagu-takahashi.com/' ||
-               apiUrl.indexOf('https://script.google.com/') === 0;
+  // 接続先は自前の受け口だけ（誘導リンク偽造でよそへ写真・トークンを送らせない）。
+  // 🔴【2026-08-03・クラウド移行】旧GASへの書き込みは凍結済み。前方一致は使わず
+  //    完全一致にする（script.google.com 配下は第三者もデプロイできる）。
+  var API_OK = apiUrl === 'https://api.antiquekagu-takahashi.com/';
   if (!API_OK) {
     showFatal('開けませんでした', '接続先が不正です。管理画面から開き直してください。', false);
     return;

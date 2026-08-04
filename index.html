@@ -626,7 +626,7 @@
 
   function boot() {
     token = readToken();
-    $('privacy-link').href = gasUrl('view=privacy');
+    $('privacy-link').href = '/privacy/';
 
     // 🔴 トークンが無い／形が違うときは data.json を待たない。
     //    案内を出すのに商品データは要らないので、**data.json が落ちていても案内は出る**。

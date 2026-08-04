@@ -260,15 +260,12 @@
   //    ⚠️ Googleを踏まないので `authuser=0` の対策そのものが不要になった。
   var API = "https://api.antiquekagu-takahashi.com/";
 
-  // 🔴【2026-08-01・Fable5監査(2周目)4】プライバシーポリシーは `../privacy.html` を
-  //   指していたが、**そのファイルはどこにも無い**（自社ドメインにも置いていない）。
-  //   個人情報を集める画面の真下のリンクが404だった。旧カタログと同じく
-  //   GASの `?view=privacy`（ログイン不要・静的）を使う。
-  //   APIは端末ごとに差し替えうるので、静的に書かず起動時に差す。
+  // 🔴【2026-08-03・クラウド移行】プライバシーポリシーも自社ドメインへ移した。
+  //   APIの受け口に `?view=privacy` を付けてもHTMLは返らないため、公開ページを明示する。
   (function () {
     var els = document.querySelectorAll("a.privacy-link");
     for (var i = 0; i < els.length; i++) {
-      els[i].href = API + "?view=privacy";
+      els[i].href = "https://qr.antiquekagu-takahashi.com/privacy/";
       els[i].target = "_blank";
       els[i].rel = "noopener";
     }

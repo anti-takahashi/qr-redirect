@@ -92,6 +92,25 @@
   .view { display: none; }
   .view.on { display: block; }
 
+  /* 商品一覧のページ操作は、50件を読み終えた位置までスクロールしなくても使えるよう
+     画面下へ固定する。iPhoneのホームバーぶんも避ける。 */
+  #v-list.on { padding-bottom: calc(82px + env(safe-area-inset-bottom)); }
+  #lst-pager {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 18;
+    padding: 8px 14px calc(8px + env(safe-area-inset-bottom));
+    background: rgba(250, 247, 242, 0.97); border-top: 1px solid var(--line);
+    box-shadow: 0 -4px 16px rgba(47, 43, 38, 0.08);
+  }
+  #lst-pager-inner {
+    max-width: 692px; margin: 0 auto; display: grid;
+    grid-template-columns: minmax(82px, 1fr) minmax(120px, auto) minmax(82px, 1fr);
+    align-items: center; gap: 8px;
+  }
+  #lst-pager .btn { min-height: 50px; margin: 0; padding: 8px 12px; justify-content: center; }
+  #lst-pager .btn .t { text-align: center; }
+  #lst-page { text-align: center; color: var(--fg); font-size: 13px; line-height: 1.35; }
+  #lst-pager button:disabled { opacity: 0.38; cursor: default; }
+
   .card {
     background: var(--card); border: 1px solid var(--line);
     border-radius: 14px; padding: 16px; margin-bottom: 12px;
@@ -440,9 +459,13 @@
       <div class="msg" id="lst-msg"></div>
     </div>
     <div id="lst-list"></div>
-    <button class="btn" id="lst-more" type="button" style="display:none;">
-      <span class="t">もっと見る</span>
-    </button>
+    <nav id="lst-pager" aria-label="商品一覧のページ" style="display:none;">
+      <div id="lst-pager-inner">
+        <button class="btn" id="lst-prev" type="button"><span class="t">← 前へ</span></button>
+        <div id="lst-page" aria-live="polite">1 / 1ページ</div>
+        <button class="btn" id="lst-next" type="button"><span class="t">次へ →</span></button>
+      </div>
+    </nav>
   </section>
 
   <!-- ===== ここから管理モード（オーナーのみ） ===== -->
@@ -2151,7 +2174,9 @@
   // 🔴 オーナー方針「オーナーがガード機能」＝ここでは条件で弾かない。
   //    代わりに、やったことは必ず記録に残る（サーバ側 logStoreChangeOrThrow_）。
   // ==========================================================================
-  var LST = { offset: 0, limit: 50, keyword: "", done: false };
+  // 1ページ50件。追記式にすると次ページの入口が画面最下部へ逃げるため、
+  // ページ単位で入れ替え、操作は下部固定バーに集める。
+  var LST = { page: 0, limit: 50, keyword: "", total: 0, loading: false };
 
   // 🔴【2026-08-01・Codex監査(3周目)4】写真を出す。
   //   このカードから**店頭価格とネット候補を変えられる**のに、名前とIDしか出ていなかった。
@@ -2174,9 +2199,12 @@
     if (!im) return;
     var note = document.createElement("div");
     note.className = "sub lst-nothumb";
-    note.style.cssText = "font-size:12px;color:var(--danger);";
+    note.style.cssText = "font-size:12px;color:var(--danger);margin:6px 0 8px;";
     note.textContent = "写真を読めませんでした（品物を確かめてから直してください）";
-    im.parentNode.appendChild(note);
+    // 写真と商品名の横並びへ入れると、文言が3列目になって商品名を縦1文字幅へ潰す。
+    // 横並びの直後（カード幅いっぱい）へ出す。
+    var row = card.querySelector(".tap-open");
+    if (row && row.parentNode) row.parentNode.insertBefore(note, row.nextSibling);
   }
 
   function lstMarkNoThumb(part) {
@@ -2195,13 +2223,13 @@
   function lstThumbs(ids, from) {
     if (from >= ids.length) return;
     // 🔴【2026-08-01・オーナー実機「重い」】12件ずつにしていたので、
-    //   50件の一覧で**同じシートを5回読み、5往復**していた。
-    //   cacheOnly はDriveへ行かない（シートを1回読むだけ）ので、まとめて頼む。
-    //   ⚠️ サーバ側の上限（PRICING_THUMB_CACHE_ONLY_MAX_）を超えて頼まない。
+    //   50件の一覧で**5往復**していた。まとめて頼む。
+    // 🔴【2026-08-04・クラウド移行】`cacheOnly` を外した。
+    //   GAS時代は「画像キャッシュのシートだけ見る／Driveを走査しない」の合図だったが、
+    //   受け口は写真の実体を持っていて**この合図を見ていない**＝送っても意味がない。
+    //   ⚠️ 意味の無い引数を残すと、次の人が「効いている」と思って設計を誤る。
     var part = ids.slice(from, from + 200);
-    // cacheOnly＝画像キャッシュだけを見る。付けないとサーバが1件ずつDriveを走査する
-    //（50件並ぶ画面なので、開いただけで最大50回の走査になる）。
-    call("getPricingThumbnails", { masterIds: part, cacheOnly: true }).then(function (map) {
+    call("getPricingThumbnails", { masterIds: part }).then(function (map) {
       if (map) {
         var cs = $("lst-list").querySelectorAll(".card");
         for (var m = 0; m < cs.length; m++) {
@@ -2344,26 +2372,38 @@
     wireOpen(c, c.getAttribute("data-id"));
 }
 
-  // 「もっと見る」は同じ検索の続きなので、世代を進めずに引き継ぐ。
-  //   新しい検索（more でない）ときだけ進める＝古い結果が混ざらない。
-  var LST_SEQ_HOLD = null;
+  function lstUpdatePager() {
+    var pages = Math.max(1, Math.ceil(LST.total / LST.limit));
+    $("lst-pager").style.display = LST.total > 0 ? "" : "none";
+    $("lst-page").textContent = (LST.page + 1) + " / " + pages + "ページ（" + LST.total + "点）";
+    $("lst-prev").disabled = LST.loading || LST.page <= 0;
+    $("lst-next").disabled = LST.loading || LST.page + 1 >= pages;
+  }
 
-  function loadList(more) {
+  function loadList(page, moveTop) {
     var msg = $("lst-msg");
     var box = $("lst-list");
-    if (!more) { LST.offset = 0; LST.done = false; box.innerHTML = ""; LST_SEQ_HOLD = null; }
+    page = Math.max(0, Number(page) || 0);
+    LST.page = page;
+    LST.loading = true;
     msg.className = "msg"; msg.textContent = "さがしています…";
-    $("lst-more").style.display = "none";
-    var seq = (more && LST_SEQ_HOLD !== null) ? LST_SEQ_HOLD : bumpSeq("lst");
-    LST_SEQ_HOLD = seq;
+    box.innerHTML = "";
+    lstUpdatePager();
+    var seq = bumpSeq("lst");
     call("storeListProducts", {
-      opts: { keyword: LST.keyword, offset: LST.offset, limit: LST.limit }
+      opts: { keyword: LST.keyword, offset: LST.page * LST.limit, limit: LST.limit }
     }).then(function (res) {
       var rows = (res && res.items) || res || [];
       if (!Array.isArray(rows)) rows = [];
-      if (!rows.length && !LST.offset) {
+      if (isStale("lst", seq)) return;
+      var reportedTotal = Number(res && res.total);
+      LST.total = Number.isFinite(reportedTotal) && reportedTotal >= 0
+        ? reportedTotal
+        : (LST.page * LST.limit + rows.length);
+      if (!rows.length && !LST.page) {
         msg.className = "msg";
         msg.textContent = LST.keyword ? "見つかりませんでした。" : "まだ1点もありません。";
+        lstUpdatePager();
         return;
       }
       msg.textContent = "";
@@ -2374,27 +2414,36 @@
       //   遅れて届いたAの結果がBの下に**混ざって並ぶ**（上書きではなく混在）。
       //   このカードから値段とネット候補を書けるので、
       //   「検索した言葉と違う品を直す」につながる。offset も二重に進む。
-      if (isStale("lst", seq)) return;
-      box.insertAdjacentHTML("beforeend", h);
+      box.innerHTML = h;
       var cards = box.querySelectorAll(".card");
-      for (var j = cards.length - rows.length; j < cards.length; j++) lstWire(cards[j]);
+      for (var j = 0; j < cards.length; j++) lstWire(cards[j]);
       // 🔴 写真は後追いで12点ずつ（Codex監査(3周目)4）。値付け画面と同じ作り。
       //    途中で失敗しても続きへ進む（1回の失敗で以降が全部空欄にならないように）。
       lstThumbs(rows.map(function (r) { return r.masterId; }), 0);
-      LST.offset += rows.length;
-      // 満杯で返ってきたら、まだ先がある
-      $("lst-more").style.display = (rows.length >= LST.limit) ? "" : "none";
     }).catch(function (e) {
+      if (isStale("lst", seq)) return;
       msg.className = "msg err";
       msg.textContent = "一覧が読めていません（0点ではありません）。" + e.message;
+    }).finally(function () {
+      if (isStale("lst", seq)) return;
+      LST.loading = false;
+      lstUpdatePager();
+      if (moveTop) window.scrollTo({ top: 0, behavior: "auto" });
     });
   }
   // 言葉の窓は廃止（窓は1つ＝上の findGo が振り分ける）
-  $("lst-more").addEventListener("click", function () { loadList(true); });
+  $("lst-prev").addEventListener("click", function () {
+    if (!LST.loading && LST.page > 0) loadList(LST.page - 1, true);
+  });
+  $("lst-next").addEventListener("click", function () {
+    var pages = Math.ceil(LST.total / LST.limit);
+    if (!LST.loading && LST.page + 1 < pages) loadList(LST.page + 1, true);
+  });
   ONSHOW["list"] = function () {
     // 現物が手元にあるときが多いので、開いたらQR/IDの欄にカーソルを置く
     setTimeout(function () { $("sch-input").focus(); }, 60);
-    if (!$("lst-list").children.length) loadList(false);
+    if (!$("lst-list").children.length) loadList(0, false);
+    else lstUpdatePager();
   };
 
   // ==========================================================================
