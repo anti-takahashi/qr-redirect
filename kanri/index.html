@@ -1650,8 +1650,13 @@
 
   function loadToday() {
     var box = $("sale-today");
-    call("listTodaySoldProducts", {}).then(function (rows) {
-      rows = rows || [];
+    call("listTodaySoldProducts", {}).then(function (res) {
+      // 🔴【2026-08-04 自己検査】受け口は **{items:[…]}** を返す（GASは配列だった）。
+      //    ここで配列として読んでいたため `rows.length` が undefined になり、
+      //    売れていても**必ず「まだありません。」**になっていた
+      //    ＝今日の売上が見えず、「戻す」ボタンも一度も描かれていなかった。
+      //    ⚠️ 念のため配列で来ても動くようにする（新旧どちらの形でも読める）。
+      var rows = (res && res.items) || (Object.prototype.toString.call(res) === "[object Array]" ? res : []);
       if (!rows.length) { box.textContent = "まだありません。"; return; }
       var h = "";
       for (var i = 0; i < rows.length; i++) {
@@ -1669,7 +1674,8 @@
              (r.manual ? ' <span style="display:inline-block; padding:1px 7px; border-radius:999px;' +
                          ' background:var(--accent); color:#fff; font-size:11px; font-weight:700;">手入力</span>' : "") +
              "</div>" +
-             '<div class="sub" style="font-size:12px; white-space:nowrap;">' + yen(r.saleValue) + "</div>" +
+             '<div class="sub" style="font-size:12px; white-space:nowrap;">' +
+             yen(r.soldPrice != null ? r.soldPrice : r.saleValue) + "</div>" +
              '<button type="button" class="sale-undo" data-id="' + esc(r.masterId) + '" ' +
              'data-sale="' + esc(r.saleId || "") + '" ' +
              'style="min-height:44px;padding:0 10px;border:1px solid var(--line);' +
@@ -3139,11 +3145,13 @@
   // ---- 今日のやり取り（2026-07-31 オーナー依頼 → 2026-08-04にクラウド側へ作り直し）----
   // 🔴 状態（済み／これから）は**PC版が持つ**。ここでは直せない。
   //    直せるようにすると正本が2つになり、どちらが本当か分からなくなる。
-  function esc(v) {
-    return String(v == null ? "" : v)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
-  function loadToday() {
+  // 🔴【2026-08-04 自己検査】ここに `esc` と `loadToday` を素の名前で置いていたため、
+  //    **同じ入れ物の中で先に定義したレジ側を丸ごと上書き**していた（深さ1で同じスコープ）。
+  //    結果: ①「今日の売上」が永久に読み込み中のまま ②店舗モードの人が
+  //    「売上を入れる」を開いた瞬間・会計の直後に master 専用の口を叩いて強制ログアウト。
+  //    ⚠️ 後から画面を足すときは**必ず名前を分ける**（この画面は1つの入れ物で動いている）。
+  //    escはレジ側のものを使う（あちらは " も逃がすので、こちらより強い）。
+  function loadTodayRequests() {
     $("td-msg").textContent = "読み込んでいます…";
     $("td-at").textContent = "";
     $("td-list").innerHTML = "";
@@ -3176,7 +3184,7 @@
       $("td-msg").textContent = "読み込めませんでした：" + ((e && e.message) || "");
     });
   }
-  ONSHOW["today"] = loadToday;
+  ONSHOW["today"] = loadTodayRequests;
 
   $("td-send").addEventListener("click", function () {
     var text = $("td-text").value.trim();
