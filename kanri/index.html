@@ -461,6 +461,19 @@
       <button class="btn" id="sch-scan" type="button" style="min-height:56px;">
         <span class="t" style="text-align:center;">QRを読む</span></button>
       <button class="btn primary" id="sch-go" type="button"><span class="t">探す</span></button>
+      <!-- 🔴【2026-08-05 オーナー指示】「ID順は無意味。登録新しい順にしてください。
+           ソートで登録古い順、価格高い順、安い順も。」
+           IDは印刷済みラベルの束から取るので登録の順とは無関係
+           （実測: その日の42件をID降順にすると先頭がT-00524だが、最後に登録したのはT-00480）。 -->
+      <label class="f" style="margin-top:10px;">
+        <span>並び順</span>
+        <select id="lst-sort" style="min-height:56px;">
+          <option value="new">登録が新しい順</option>
+          <option value="old">登録が古い順</option>
+          <option value="price_desc">値段が高い順</option>
+          <option value="price_asc">値段が安い順</option>
+        </select>
+      </label>
       <div class="msg" id="sch-msg"></div>
       <div class="msg" id="lst-msg"></div>
     </div>
@@ -1989,6 +2002,17 @@
   $("sch-input").addEventListener("keydown", function (e) {
     if (e.key === "Enter") { e.preventDefault(); findGo(); }
   });
+  // 並び順を変えたら1ページ目から出し直す（今のページ位置は意味を失うため）。
+  // ⚠️ 覚えない＝次に開いたときは必ず「登録が新しい順」に戻す
+  //    （店頭で交代しながら使う面なので、前の人が変えた並びを引き継がせない）。
+  (function () {
+    var sel = $("lst-sort");
+    if (!sel) return;
+    sel.addEventListener("change", function () {
+      LST.sort = sel.value || "new";
+      loadList(0, true);
+    });
+  })();
 
   // QRを読む（4画面ぶん）。読めた文字はその画面の入力欄へ入れ、そのまま先へ進める。
   // 🔴 読ませておいて「次に何を押すか」を考えさせない（店頭で片手で使う）。
@@ -2225,7 +2249,9 @@
   // ==========================================================================
   // 1ページ50件。追記式にすると次ページの入口が画面最下部へ逃げるため、
   // ページ単位で入れ替え、操作は下部固定バーに集める。
-  var LST = { page: 0, limit: 50, keyword: "", total: 0, loading: false };
+  // 🔴 sort の既定は "new"（登録が新しい順）。マスターIDでは並べない
+  //    ＝IDは印刷済みラベルの束から取るので、登録の順とは何の関係も無い（2026-08-05 オーナー指摘）。
+  var LST = { page: 0, limit: 50, keyword: "", total: 0, loading: false, sort: "new" };
 
   // 🔴【2026-08-01・Codex監査(3周目)4】写真を出す。
   //   このカードから**店頭価格とネット候補を変えられる**のに、名前とIDしか出ていなかった。
@@ -2471,7 +2497,7 @@
     lstUpdatePager();
     var seq = bumpSeq("lst");
     call("storeListProducts", {
-      opts: { keyword: LST.keyword, offset: LST.page * LST.limit, limit: LST.limit }
+      opts: { keyword: LST.keyword, offset: LST.page * LST.limit, limit: LST.limit, sort: LST.sort }
     }).then(function (res) {
       var rows = (res && res.items) || res || [];
       if (!Array.isArray(rows)) rows = [];
