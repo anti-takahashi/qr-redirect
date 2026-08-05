@@ -2844,6 +2844,10 @@
     //   ⚠️ 置き場は `{ID}/net/`＝**カタログ用とは分ける**（客が見る面に裏面や傷が出ない）。
     h += '<div style="margin-top:14px; border-top:1px solid var(--line); padding-top:12px;">' +
          '<div class="sub" style="margin-bottom:8px;">出品用の写真（カタログ用とは別に貯まります）</div>' +
+         // 🔴【2026-08-05 監査④】**貯まった写真を見る場所が無かった。**
+         //    上げる口（下のボタン）だけがあって一覧が無く、
+         //    入れたら二度と出てこない＝何枚入れたのかも分からない状態だった。
+         '<div id="net-photos" class="sub">写真を読み込んでいます…</div>' +
          '<input id="net-file" type="file" accept="image/*" multiple ' +
          'style="position:absolute;width:1px;height:1px;opacity:0;">' +
          '<button class="btn" id="net-photo" type="button">' +
@@ -3011,6 +3015,60 @@
       });
     }).catch(function () { /* 判定は既に出ている。ここが落ちても画面は使える */ });
 
+    // ---- 出品用の写真を見る（2026-08-05 監査④で新設）----
+    //
+    // 🔴 上げる口だけがあって見る口が無かった＝入れたら二度と出てこない。
+    //    ⚠️ 出品用は**公開URLを持たない**（客に裏面や傷を見せない）ので、
+    //       `<img src>` では取れない。認可付きの `getProductPhoto` で1枚ずつ取る。
+    function netLoadPhotos() {
+      var box = $("net-photos");
+      if (!box) return;
+      call("listProductPhotos", { masterId: masterId }).then(function (r) {
+        var list = (r && r.net) || [];
+        if (!list.length) {
+          box.textContent = "出品用の写真はまだありません。";
+          return;
+        }
+        box.innerHTML = "出品用 " + list.length + " 枚" +
+          '<div id="net-photo-grid" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;"></div>';
+        var grid = $("net-photo-grid");
+        list.forEach(function (name) {
+          var cell = document.createElement("div");
+          cell.style.cssText = "width:72px; height:72px; border:1px solid var(--line);" +
+            "border-radius:8px; overflow:hidden; background:var(--panel-2);" +
+            "display:flex; align-items:center; justify-content:center; font-size:10px;";
+          cell.textContent = "…";
+          cell.title = name;
+          grid.appendChild(cell);
+          call("getProductPhoto", { masterId: masterId, lane: "net", fileName: name, px: 200 })
+            .then(function (p) {
+              if (!p || !p.dataUri) { cell.textContent = "読めません"; return; }
+              cell.innerHTML = '<img src="' + p.dataUri +
+                '" alt="" style="width:100%;height:100%;object-fit:cover;">';
+              // タップで大きく見る（現物と見比べるので、小さいままでは用が足りない）
+              cell.addEventListener("click", function () {
+                call("getProductPhoto", { masterId: masterId, lane: "net", fileName: name, px: 1000 })
+                  .then(function (big) {
+                    if (!big || !big.dataUri) return;
+                    var ov = document.createElement("div");
+                    ov.style.cssText = "position:fixed; inset:0; background:rgba(0,0,0,.85);" +
+                      "display:flex; align-items:center; justify-content:center; z-index:9999;";
+                    ov.innerHTML = '<img src="' + big.dataUri +
+                      '" alt="" style="max-width:96vw; max-height:92vh;">';
+                    ov.addEventListener("click", function () { ov.remove(); });
+                    document.body.appendChild(ov);
+                  }).catch(function () { /* 大きい方が取れなくても一覧は使える */ });
+              });
+            })
+            // 🔴 「無い」と「読めない」を混ぜない
+            .catch(function () { cell.textContent = "読めません"; });
+        });
+      }).catch(function (e) {
+        box.textContent = "出品用の写真を読めませんでした（" + e.message + "）";
+      });
+    }
+    netLoadPhotos();
+
     // ---- 出品用の写真を足す ----
     $("net-photo").addEventListener("click", function () { $("net-file").click(); });
     $("net-file").addEventListener("change", function () {
@@ -3027,6 +3085,8 @@
           m.textContent = failed
             ? done + "枚を入れました（" + failed + "枚は入りませんでした）。"
             : done + "枚を入れました。";
+          // 🔴 入れたら**その場で見えるようにする**（入れた実感が無いと二重に入れる）
+          if (done) netLoadPhotos();
           return;
         }
         var fr = new FileReader();
