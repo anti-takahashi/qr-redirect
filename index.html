@@ -22,13 +22,15 @@
         このページは2か所へ同じ物を置く＝オーナー名義ドメインの `/` と、自社ECの `/docs/catalog/`。
         ルート基準で書くと自社EC側が antique-takahashi.com のルートを見に行き、
         そこには何も無いのでアイコンが出ない（実際に出ていなかった）。
-        相対なら両方で正しい場所を指す。manifest.json の src / start_url / scope も同じ理由で相対。 -->
+        相対なら両方で正しい場所を指す。manifest.webmanifest の src / start_url / scope も同じ理由で相対。
+     🔴 ファイル名は manifest.webmanifest（2026-08-06 改名）。自社ECのサーバが
+        「manifest.json」というファイル名だけを403で弾くため（.webmanifest なら通る・実測）。 -->
 <link rel="apple-touch-icon" href="icon-catalog-180.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-catalog-192.png">
 <meta name="apple-mobile-web-app-title" content="カタログ">
 <meta name="application-name" content="カタログ">
 <!-- Androidはここ（manifest）のicons/short_nameを見る。iPhoneは上の2行を見る。 -->
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#faf7f2">
 <!--
   ===========================================================================
