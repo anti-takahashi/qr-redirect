@@ -15,7 +15,7 @@
 <link rel="icon" type="image/png" sizes="192x192" href="../icon-admin-192.png">
 <meta name="apple-mobile-web-app-title" content="商品管理">
 <meta name="application-name" content="商品管理">
-<meta name="theme-color" content="#faf7f2">
+<meta name="theme-color" content="#f7f1e7">
 <meta name="robots" content="noindex, nofollow">
 <!-- 🔴 manifest は付けない。付けるとiOSが**web appとして起動**し、
      ①開くURLが start_url に置き換わる ②localStorage が Safari と別領域になる。
@@ -23,10 +23,18 @@
      アイコンと名前は上の apple-touch-icon / apple-mobile-web-app-title で足りる。 -->
 
 <style>
+  /* 🔴【2026-08-11】4面デザイン統一（正本= four-surface-design-handoff/HANDOFF.md）。
+     値はトークン表から写す。独自色を足さない。
+     ⚠️ この下にあるオーナー決定（拡大させない・横向きにしない・ホームタイルの大きさ・
+        入力16px）は**設計の核**＝色替えで壊さない。 */
   :root {
-    --bg: #faf7f2; --fg: #2f2b26; --accent: #7c6a4f;
-    --muted: #6b6255; --line: #e3dcd0; --card: #fff;
-    --ok: #2f7a4d; --danger: #c0392b;
+    --bg: #f7f1e7; --fg: #2b2926; --accent: #83937d;
+    --muted: #665e54; --line: #e8dec7; --card: #fefbf5; --card-raised: #ffffff;
+    --ok: #2f7a4d; --danger: #812b45; --warn: #a9781d;
+    --shadow-subtle: 0 1px 2px rgba(43, 41, 38, 0.08);
+    --shadow-card: 0 12px 24px -7px rgba(43, 41, 38, 0.16);
+    --motion-press: 80ms; --motion-base: 160ms;
+    --ease-ui: cubic-bezier(.2, .8, .2, 1);
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
@@ -90,7 +98,14 @@
 
   /* 🔴 画面は「切り替える」だけ。移動しない＝白い画面を挟まない */
   .view { display: none; }
-  .view.on { display: block; }
+  /* 画面切替は160msで柔らかく入る（HANDOFF追記 C/D共通・大きくスライドさせない） */
+  .view.on { display: block; animation: view-in var(--motion-base) var(--ease-ui) both; }
+  @keyframes view-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  /* 通信中は押せない・待ちが見える（JSが .is-busy / aria-busy を付ける） */
+  .is-busy, [aria-busy="true"] { cursor: wait; opacity: .72; pointer-events: none; }
+  /* 更新できた行の短い確認（JSが .is-just-updated を付ける） */
+  .is-just-updated { animation: updated-feedback 480ms ease-out; }
+  @keyframes updated-feedback { from { background-color: rgba(47,122,77,.18); } to { background-color: transparent; } }
 
   /* 商品一覧のページ操作は、50件を読み終えた位置までスクロールしなくても使えるよう
      画面下へ固定する。iPhoneのホームバーぶんも避ける。 */
@@ -98,8 +113,8 @@
   #lst-pager {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 18;
     padding: 8px 14px calc(8px + env(safe-area-inset-bottom));
-    background: rgba(250, 247, 242, 0.97); border-top: 1px solid var(--line);
-    box-shadow: 0 -4px 16px rgba(47, 43, 38, 0.08);
+    background: rgba(247, 241, 231, 0.97); border-top: 1px solid var(--line);
+    box-shadow: 0 -4px 16px rgba(43, 41, 38, 0.08);
   }
   #lst-pager-inner {
     max-width: 692px; margin: 0 auto; display: grid;
@@ -113,7 +128,8 @@
 
   .card {
     background: var(--card); border: 1px solid var(--line);
-    border-radius: 14px; padding: 16px; margin-bottom: 12px;
+    border-radius: 16px; padding: 16px; margin-bottom: 12px;
+    box-shadow: var(--shadow-subtle);
   }
   h2 { font-size: 16px; margin: 0 0 8px; }
   p { margin: 0 0 10px; }
@@ -123,10 +139,17 @@
   .btn {
     display: flex; align-items: center; gap: 12px; width: 100%;
     min-height: 60px; padding: 12px 16px; margin-bottom: 10px;
-    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    background: var(--card-raised); border: 1px solid var(--line); border-radius: 16px;
     font: inherit; font-weight: 700; color: var(--fg); text-align: left; cursor: pointer;
+    box-shadow: var(--shadow-subtle);
+    transition: transform var(--motion-press) var(--ease-ui);
   }
-  .btn:active { background: #f2ece2; }
+  /* 押した瞬間に1px沈む（HANDOFF §6。スマホなのでhoverには依存しない） */
+  .btn:active { transform: translateY(1px) scale(.985); transition-duration: 60ms; }
+  .btn:focus-visible, #home-tabs button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  }
   .btn .t { flex: 1; }
   .btn .d { display: block; font-weight: 400; font-size: 12.5px; color: var(--muted); }
 
@@ -170,7 +193,7 @@
     width: 100%; min-height: 52px; padding: 10px 12px;
     border: 1px solid var(--line); border-radius: 12px;
     font-family: inherit; font-size: 16px; line-height: 1.5;
-    background: #fff; color: var(--fg);
+    background: var(--card-raised); color: var(--fg);
   }
   label.f { display: block; margin-bottom: 12px; }
   label.f > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
@@ -188,14 +211,14 @@
   #scan-box { width: 100%; max-width: 420px; border-radius: 14px; overflow: hidden; background: #000; }
   #scan-shot { width: 100%; max-width: 420px; display: none; flex-direction: column; gap: 14px; }
   #scan-shot-note { color: #fff; text-align: center; font-size: 16px; }
-  #scan-shot .btn { background: #fff; color: var(--fg); border-color: #fff; }
+  #scan-shot .btn { background: var(--card-raised); color: var(--fg); border-color: #fff; }
   /* 切り替えは主役ではないので、控えめに */
   #scan-mode { background: none; border: 0; color: #e8ddcf; text-decoration: underline;
                font: inherit; font-size: 14px; padding: 10px 12px; min-height: 44px; cursor: pointer; }
   #scan-box video { width: 100%; display: block; }
   #scan-note { font-size: 15px; text-align: center; }
   #scan-overlay .msg { color: #ffd9d0; text-align: center; }
-  #scan-overlay .btn { max-width: 420px; background: #fff; color: var(--fg); border-color: #fff; }
+  #scan-overlay .btn { max-width: 420px; background: var(--card-raised); color: var(--fg); border-color: #fff; }
   .msg.err { color: var(--danger); font-weight: 700; }
   .msg.ok { color: var(--ok); font-weight: 700; }
 
@@ -1356,7 +1379,7 @@
           //    （棚の前では「本当に撮れたのか」が一番の不安）。
           var t = document.createElement("img");
           t.src = url;
-          t.style.cssText = "width:64px;height:64px;object-fit:cover;border-radius:8px;background:#efe9de;";
+          t.style.cssText = "width:64px;height:64px;object-fit:cover;border-radius:8px;background:#e8dec7;";
           $("reg-thumbs").appendChild(t);
         }).catch(function () { failed += 1; })
           .finally(function () {
@@ -1798,7 +1821,7 @@
       box.innerHTML =
         '<div class="card">' +
         '<img id="sch-th" alt="" style="display:none; width:100%; max-height:280px;' +
-        'object-fit:contain; border-radius:12px; background:#efe9de; margin-bottom:12px;">' +
+        'object-fit:contain; border-radius:12px; background:#e8dec7; margin-bottom:12px;">' +
         "<h2>" + esc(d["商品名"] || masterId) + "</h2>" +
         '<div class="sub" style="margin-bottom:10px;">' + esc(masterId) +
         "　" + (d["店頭価格"] === "" || d["店頭価格"] == null ? "値段まだ" : yen(d["店頭価格"])) +
@@ -2074,7 +2097,7 @@
         h += '<div class="card" data-id="' + esc(id) + '" data-rev="' + esc(rev) + '">' +
              openable(
              '<img class="pri-th" alt="" style="width:64px;height:64px;border-radius:10px;' +
-             'object-fit:cover;background:#efe9de;flex:none;">' +
+             'object-fit:cover;background:#e8dec7;flex:none;">' +
              '<div style="flex:1; min-width:0;">' +
              openTitle(nm) +
              '<div class="sub">' + esc(id) + "</div></div>") +
@@ -2367,7 +2390,7 @@
       //      の2つを外さない。押せるのに押せると見えない、が一番使われない形。
       openable(
       '<img class="lst-th" alt="" style="width:56px;height:56px;border-radius:10px;' +
-      'object-fit:cover;background:#efe9de;flex:none;">' +
+      'object-fit:cover;background:#e8dec7;flex:none;">' +
       '<div style="flex:1; min-width:0;">' +
       openTitle(r.name || r.masterId) +
       '<div class="sub">' + esc(r.masterId) +
@@ -2610,7 +2633,7 @@
     //    ⚠️ 後追いで入れる（項目の表示を写真で待たせない）。
     var h = '<div class="card">' +
             '<img id="edt-th" alt="" style="display:none; width:100%; max-height:240px;' +
-            'object-fit:contain; border-radius:12px; background:#efe9de; margin-bottom:12px;">' +
+            'object-fit:contain; border-radius:12px; background:#e8dec7; margin-bottom:12px;">' +
             "<h2>" + esc(d["商品名"] || masterId) + "</h2>" +
             '<div class="sub" style="margin-bottom:10px;">' + esc(masterId) +
             "　" + esc(d["在庫ステータス"] || "") + "</div>";
@@ -2806,7 +2829,7 @@
     //   写真・商品名・説明を出す（写真は後追いで入れて、判定を待たせない）。
     var h = '<div class="card">' +
             '<img id="net-th" alt="" style="display:none; width:100%; max-height:240px;' +
-            'object-fit:contain; border-radius:12px; background:#efe9de; margin-bottom:12px;">' +
+            'object-fit:contain; border-radius:12px; background:#e8dec7; margin-bottom:12px;">' +
             '<h2 id="net-name">' + esc(masterId) + "</h2>" +
             '<div class="sub" id="net-sub" style="margin-bottom:10px;">' + esc(masterId) + "</div>" +
             '<div id="net-desc"></div>';
@@ -3179,7 +3202,7 @@
              //（⚠️ style を2つ書かない。後ろが効いて前が消える）
              '<img alt="" ' + (th ? 'src="' + esc(th) + '" ' : "") +
              'style="width:64px;height:64px;border-radius:10px;object-fit:cover;' +
-             'background:#efe9de;flex:none;' + (th ? "" : "display:none;") + '">' +
+             'background:#e8dec7;flex:none;' + (th ? "" : "display:none;") + '">' +
              '<div style="flex:1; min-width:0;">' +
              openTitle(r.name || r.masterId) +
              '<div class="sub">' + esc(r.masterId) + "　" + esc(r.status || "候補") + "</div>" +

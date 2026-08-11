@@ -73,7 +73,13 @@
 
   main { padding: 14px; max-width: 760px; margin: 0 auto; }
   .view { display: none; }
-  .view.on { display: block; }
+  /* 一覧⇄詳細は160msの透明度＋下6pxだけ（HANDOFF追記 D・横スライドや履歴を妨げる遷移は使わない） */
+  .view.on { display: block; animation: view-in var(--motion-base) var(--ease-ui) both; }
+  @keyframes view-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .is-busy, [aria-busy="true"] { cursor: wait; opacity: .72; pointer-events: none; }
+  /* お気に入りが実際に保存できた後の確認（JSが .is-confirmed を付ける＝配線は別タスク） */
+  .fav.is-confirmed { animation: favorite-confirmed var(--motion-base) var(--ease-ui); }
+  @keyframes favorite-confirmed { 50% { transform: scale(1.12); } }
 
   .card {
     background: var(--card); border: 1px solid var(--line);
