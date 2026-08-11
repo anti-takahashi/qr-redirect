@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#7c6a4f">
+<meta name="theme-color" content="#f7f1e7">
 <meta name="robots" content="noindex, nofollow">
 <title>アンティーク家具たかはし｜商品カタログ</title>
 <!-- 🔴【2026-07-29】値段が出るまでが HTML→JSON→画像 の**直列**だった（実測0.80〜0.83秒）。
@@ -31,7 +31,7 @@
 <meta name="application-name" content="カタログ">
 <!-- Androidはここ（manifest）のicons/short_nameを見る。iPhoneは上の2行を見る。 -->
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#faf7f2">
+<meta name="theme-color" content="#f7f1e7">
 <!--
   ===========================================================================
   自社ドメインだけで完結する表示用カタログ
@@ -81,25 +81,28 @@
      詳細と正本は docs/design-system.md
 
      🔴 決めごとは2つだけ:
-       ① **ブランドの色は面ごと**（カタログ＝茶 #7c6a4f。店の顔なので変えない）
+       ① ~~ブランドの色は面ごと（カタログ＝茶）~~ 🔴 2026-08-11に4面統一へ変更（正本= four-surface-design-handoff/HANDOFF.md・セージ #83937d）。旧記述は過去のもの
        ② **意味の色は3面で固定**（カタログ／スマホ管理／PC版で同じ）
             緑 = 安全・戻せる ／ 朱 = 取り返しがつかない ／ 芥子 = 注意
           同じ色が面によって別の意味を持つと、覚え直しが起きる。
      =========================================================================== */
+  /* 🔴【2026-08-11】4面デザイン統一（正本= four-surface-design-handoff/HANDOFF.md）。
+     members/index.html と同じ顔（2026-08-01 オーナー決定）＝両方いっしょに変える。
+     ⚠️ SOLD はバーガンディ（危険＝もう買えない）。注意色 #b45b4b と混ぜない。 */
   :root {
-    --bg: #faf7f2;
-    --panel: #ffffff;
-    --ink: #2f2b26;
-    --sub: #6b6255;
-    --accent: #7c6a4f;
-    --accent-dark: #5b4c37;
-    --line: #e3ddd0;
-    --sold: #a5453a;
+    --bg: #f7f1e7;
+    --panel: #fefbf5;
+    --ink: #2b2926;
+    --sub: #665e54;
+    --accent: #83937d;
+    --accent-dark: #5f6e5a;
+    --line: #e8dec7;
+    --sold: #812b45;
 
-    /* 意味の色（3面共通・PC版 theme.css の --state-* と同じ値） */
-    --sig-safe: #2f7d55;
-    --sig-danger: #b53c32;
-    --sig-warn: #a9791a;
+    /* 意味の色（HANDOFF トークン表と同じ値。PC版 theme.css も後続の面Aで揃える） */
+    --sig-safe: #2f7a4d;
+    --sig-danger: #812b45;
+    --sig-warn: #a9781d;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html { -webkit-text-size-adjust: 100%; }

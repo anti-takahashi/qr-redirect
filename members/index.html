@@ -15,7 +15,7 @@
 <link rel="icon" type="image/png" sizes="192x192" href="../icon-catalog-192.png">
 <meta name="apple-mobile-web-app-title" content="カタログ">
 <meta name="application-name" content="カタログ">
-<meta name="theme-color" content="#faf7f2">
+<meta name="theme-color" content="#f7f1e7">
 <!-- 会員だけの画面。検索には出さない -->
 <meta name="robots" content="noindex, nofollow">
 <!-- 🔴 manifest は付けない。付けるとiOSが**web appとして起動**し、
@@ -23,10 +23,18 @@
      2026-07-31に実機で踏んだ（ホーム画面から開くとログインが消えた）。 -->
 
 <style>
+  /* 🔴【2026-08-11】4面デザイン統一（正本= four-surface-design-handoff/HANDOFF.md）。
+     値はトークン表から写す。ここに独自色を足さない。
+     ⚠️ --line-green はLINEへの遷移だけ（成功表示に使わない）。
+     ⚠️ 店名の明朝は 2026-08-01 オーナー決定（骨董らしさは見出し1行で足りる）を優先して維持。 */
   :root {
-    --bg: #faf7f2; --fg: #2f2b26; --accent: #7c6a4f;
-    --muted: #6b6255; --line: #e3dcd0; --card: #fff;
-    --ok: #2f7a4d; --danger: #c0392b; --line-green: #06c755;
+    --bg: #f7f1e7; --fg: #2b2926; --accent: #83937d;
+    --muted: #665e54; --line: #e8dec7; --card: #fefbf5; --card-raised: #ffffff;
+    --ok: #2f7a4d; --danger: #812b45; --attn: #b45b4b; --line-green: #06c755;
+    --shadow-card: 0 12px 24px -7px rgba(43, 41, 38, 0.16);
+    --shadow-subtle: 0 1px 2px rgba(43, 41, 38, 0.08);
+    --motion-press: 80ms; --motion-base: 160ms;
+    --ease-ui: cubic-bezier(.2, .8, .2, 1);
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
@@ -69,7 +77,8 @@
 
   .card {
     background: var(--card); border: 1px solid var(--line);
-    border-radius: 14px; padding: 16px; margin-bottom: 12px;
+    border-radius: 18px; padding: 16px; margin-bottom: 12px;
+    box-shadow: var(--shadow-subtle);
   }
   h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: .04em; }
   h2 { font-size: 16px; margin: 0 0 8px; }
@@ -82,20 +91,30 @@
   .btn {
     display: flex; align-items: center; justify-content: center; gap: 10px;
     width: 100%; min-height: 56px; padding: 12px 16px; margin-bottom: 10px;
-    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    background: var(--card-raised); border: 1px solid var(--line); border-radius: 16px;
     font: inherit; font-weight: 700; color: var(--fg); cursor: pointer;
     text-decoration: none;
+    transition: transform var(--motion-press) var(--ease-ui),
+                box-shadow var(--motion-base) var(--ease-ui);
+    touch-action: manipulation;
   }
   .btn.line { background: var(--line-green); color: #fff; border-color: var(--line-green); }
-  .btn:active { opacity: .85; }
+  /* 押した瞬間に1px沈む（HANDOFF §6・スマホはhoverに依存しない） */
+  .btn:active, .item:active { transform: translateY(1px) scale(.985); transition-duration: 60ms; }
+  .btn:focus-visible, .fav:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  }
 
   /* 一覧: 2列。写真が主役なので文字は控えめに */
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .item {
-    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    background: var(--card-raised); border: 1px solid var(--line); border-radius: 16px;
     overflow: hidden; cursor: pointer; position: relative;
+    box-shadow: var(--shadow-card);
+    transition: transform var(--motion-press) var(--ease-ui);
   }
-  .item img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block; background: #efe9de; }
+  .item img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block; background: var(--line); }
   .item .b { padding: 9px 10px 11px; }
   .item .n { font-size: 13px; line-height: 1.55; max-height: 4.7em; overflow: hidden; }
   .item .p { font-size: 15px; font-weight: 700; margin-top: 5px; }
@@ -112,8 +131,9 @@
   .filters { display: flex; gap: 8px; margin-bottom: 12px; }
   .input, select.input {
     width: 100%; min-height: 48px; padding: 9px 12px;
-    border: 1px solid var(--line); border-radius: 12px;
-    font: inherit; background: #fff; color: var(--fg);
+    border: 1px solid var(--line); border-radius: 14px;
+    font: inherit; font-size: 16px; /* 16px未満だとiOSが入力時に自動ズームする（HANDOFF §6） */
+    background: var(--card-raised); color: var(--fg);
   }
 
   #busy {
@@ -124,7 +144,7 @@
   }
   @keyframes sl { from { background-position: -40% 0; } to { background-position: 140% 0; } }
 
-  .detail img { width: 100%; border-radius: 12px; margin-bottom: 12px; background: #efe9de; }
+  .detail img { width: 100%; border-radius: 16px; margin-bottom: 12px; background: var(--line); }
   .price { font-size: clamp(24px, 8vw, 34px); font-weight: 700; font-variant-numeric: tabular-nums; }
 </style>
 </head>
