@@ -77,9 +77,12 @@
   .view.on { display: block; animation: view-in var(--motion-base) var(--ease-ui) both; }
   @keyframes view-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
   .is-busy, [aria-busy="true"] { cursor: wait; opacity: .72; pointer-events: none; }
-  /* お気に入りが実際に保存できた後の確認（JSが .is-confirmed を付ける＝配線は別タスク） */
+  /* お気に入りが実際に保存できた後の確認（JSが .is-confirmed を付ける・2026-08-11配線済み） */
   .fav.is-confirmed { animation: favorite-confirmed var(--motion-base) var(--ease-ui); }
   @keyframes favorite-confirmed { 50% { transform: scale(1.12); } }
+  /* 詳細画面の横いっぱいのボタンは 1.12 だと大げさなので控えめに */
+  #d-fav.is-confirmed { animation: favorite-confirmed-btn var(--motion-base) var(--ease-ui); }
+  @keyframes favorite-confirmed-btn { 50% { transform: scale(1.03); } }
 
   .card {
     background: var(--card); border: 1px solid var(--line);
@@ -651,18 +654,24 @@
           f.addEventListener("click", function (ev) {
             ev.stopPropagation();
             f.disabled = true;
+            f.classList.add("is-busy");   // 通信中は待ちが見える（押せないのが disabled、見えるのがこれ）
             var mid = f.getAttribute("data-id");
             // 見えている印の逆が「したいこと」。状態が分かる前に押されても取り違えない。
             var want = !f.classList.contains("on");
             setFav(mid, want).then(function (on) {
               f.classList.toggle("on", on);
               f.textContent = on ? "♥" : "♡";
+              // 保存できた確認の脈動。連打でも毎回頭から動かす（reflowでアニメを仕切り直す）
+              f.classList.remove("is-confirmed");
+              void f.offsetWidth;
+              f.classList.add("is-confirmed");
+              setTimeout(function () { f.classList.remove("is-confirmed"); }, 400);
               afterFavChange();
             }).catch(function (e) {
               // 🔴 黙って戻さない。押したのに何も起きないのが一番分かりにくい。
               if (isAuthError(e)) { logout(e.message); return; }
               window.alert(e.message);
-            }).finally(function () { f.disabled = false; });
+            }).finally(function () { f.disabled = false; f.classList.remove("is-busy"); });
           });
         }
       })(items[i]);
@@ -977,14 +986,19 @@
       var fb = $("d-fav");
       fb.addEventListener("click", function () {
         fb.disabled = true;
+        fb.classList.add("is-busy");
         var want = fb.textContent.indexOf("♥") === -1;
         setFav(masterId, want).then(function (on) {
           fb.textContent = on ? "♥ お気に入りに入っています" : "♡ お気に入りに入れる";
+          fb.classList.remove("is-confirmed");
+          void fb.offsetWidth;
+          fb.classList.add("is-confirmed");
+          setTimeout(function () { fb.classList.remove("is-confirmed"); }, 400);
           afterFavChange();   // 一覧へ戻ったときに消えているように
         }).catch(function (e) {
           if (isAuthError(e)) { logout(e.message); return; }
           window.alert(e.message);
-        }).finally(function () { fb.disabled = false; });
+        }).finally(function () { fb.disabled = false; fb.classList.remove("is-busy"); });
       });
       // 見られたことを記録（失敗しても画面は止めない）
       // 🔴【2026-08-01・Codex指摘】ここは { kind, masterId } を送っていたが、GASが読むのは

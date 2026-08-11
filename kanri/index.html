@@ -647,6 +647,16 @@
   var K_SES = "takahashi-kanri-session";
 
   function $(id) { return document.getElementById(id); }
+  // 【2026-08-11 操作感の配線】通信中の見た目と、保存できた瞬間の短い確認。
+  // 見た目だけの層＝保存条件・失敗の文言（.msg.err はその場に残る）には触らない。
+  function busyOn(btn)  { if (btn) btn.classList.add("is-busy"); }
+  function busyOff(btn) { if (btn) btn.classList.remove("is-busy"); }
+  function flashUpdated(el) {
+    if (!el) return;
+    el.classList.remove("is-just-updated");
+    void el.offsetWidth;   // 連続保存でも毎回頭からアニメする
+    el.classList.add("is-just-updated");
+  }
   function qs(n) {
     var m = new RegExp("[?&]" + n + "=([^&]*)").exec(location.search);
     return m ? decodeURIComponent(m[1].replace(/\+/g, " ")) : "";
@@ -1574,6 +1584,7 @@
     var msg = $("sale-msg");
     if (!raw) { msg.className = "msg err"; msg.textContent = "QRを読むか、商品IDを入れてください。"; return; }
     msg.className = "msg"; msg.textContent = "調べています…";
+    busyOn($("sale-add"));
     call("resolveCartItem", { rawText: raw }).then(function (it) {
       if (!it) {
         msg.className = "msg err";
@@ -1612,11 +1623,12 @@
       msg.className = "msg ok";
       msg.textContent = "入れました: " + (it.name || it.masterId);
       renderCart();
+      flashUpdated(msg);
       $("sale-input").focus();
     }).catch(function (e) {
       msg.className = "msg err";
       msg.textContent = e.message;
-    });
+    }).finally(function () { busyOff($("sale-add")); });
   }
   $("sale-add").addEventListener("click", addToCart);
   $("sale-input").addEventListener("keydown", function (e) {
@@ -1653,6 +1665,7 @@
     // 🔴 成功するまで同じ operationId を使う＝押し直しても2件にならない
     if (!saleOpId) saleOpId = newOpId();
     $("sale-go").disabled = true;
+    busyOn($("sale-go"));
     res.className = "msg"; res.textContent = "登録しています…";
     call("createSale", {
       // 手入力は {manual, name, price}、QRのある品はIDの文字列。サーバが見分ける
@@ -1674,6 +1687,7 @@
       saleOpId = "";
       $("sale-disc").value = "";
       renderCart();
+      flashUpdated(res);
       loadToday();
     }).catch(function (e) {
       res.className = "msg err";
@@ -1681,6 +1695,7 @@
       // 🔴 opId は捨てない。同じ会計をもう一度押したときに二重登録しないため。
     }).finally(function () {
       $("sale-go").disabled = false;
+      busyOff($("sale-go"));
     });
   });
 
@@ -1901,6 +1916,7 @@
         if (!p || p < 1) { pm.className = "msg err"; pm.textContent = "値段を入れてください。"; return; }
         var pb = $("sch-price-save");
         pb.disabled = true;
+        busyOn(pb);
         pm.className = "msg"; pm.textContent = "直しています…";
         call("storeChangePrice", { masterId: masterId, price: p, expectedRev: rev })
           .then(function (res) {
@@ -1914,10 +1930,11 @@
             }
             pm.className = "msg ok";
             pm.textContent = "直しました。オーナーの画面にも出ます。";
+            flashUpdated(pm);
             if (res && res.rev != null) rev = res.rev;   // 補足の保存が拒否されないように
           }).catch(function (e) {
             pm.className = "msg err"; pm.textContent = e.message;
-          }).finally(function () { pb.disabled = false; });
+          }).finally(function () { pb.disabled = false; busyOff(pb); });
       });
 
       if (typeof after === "function") after();
@@ -1925,6 +1942,7 @@
         var m = $("sch-save-msg");
         var v = String($("sch-memo").value || "");
         $("sch-save").disabled = true;
+        busyOn($("sch-save"));
         m.className = "msg"; m.textContent = "保存しています…";
         // 🔴 版数を必ず添える。無いとサーバが拒否する（古い内容で上書きさせない歯止め）。
         call("updateProductFields", {
@@ -1933,6 +1951,7 @@
         }).then(function () {
           m.className = "msg ok";
           m.textContent = "保存しました。";
+          flashUpdated(m);
           // 🔴【2026-08-01・Fable5監査High-4】すぐ再読込すると、同じ処理の中で
           //   画面全体が差し替わるため**「保存しました。」が一度も描かれない**。
           //   店舗モードは「保存できたことをはっきり見せる」が要件なので、
@@ -1963,6 +1982,7 @@
           m.textContent = e.message;
         }).finally(function () {
           $("sch-save").disabled = false;
+          busyOff($("sch-save"));
         });
       });
     }).catch(function (e) {
@@ -2704,6 +2724,7 @@
         m.className = "msg"; m.textContent = "変わっていません。"; return;
       }
       $("edt-save").disabled = true;
+      busyOn($("edt-save"));
       m.className = "msg"; m.textContent = "保存しています…";
 
       var priceStep = (newPrice === null) ? Promise.resolve(null)
@@ -2725,7 +2746,7 @@
           var kept = m.textContent, keptC = m.className;
           editOpen(masterId, undefined, function () {
             var m3 = $("edt-save-msg");
-            if (m3) { m3.className = keptC; m3.textContent = kept; }
+            if (m3) { m3.className = keptC; m3.textContent = kept; flashUpdated(m3); }
           });
           return null;
         }
@@ -2756,12 +2777,12 @@
         var keepCls = m.className;
         editOpen(masterId, undefined, function () {
           var m2 = $("edt-save-msg");
-          if (m2) { m2.className = keepCls; m2.textContent = keepMsg; }
+          if (m2) { m2.className = keepCls; m2.textContent = keepMsg; flashUpdated(m2); }
         });
       }).catch(function (e) {
         m.className = "msg err";
         m.textContent = e.message;
-      }).finally(function () { $("edt-save").disabled = false; });
+      }).finally(function () { $("edt-save").disabled = false; busyOff($("edt-save")); });
     });
   }
 
@@ -3020,6 +3041,7 @@
         }
         if (!changed) { m.className = "msg"; m.textContent = "変わっていません。"; return; }
         $("net-save").disabled = true;
+        busyOn($("net-save"));
         m.className = "msg"; m.textContent = "保存しています…";
         call("updateProductFields", { masterId: masterId, patch: patch }).then(function (r) {
           // 🔴 送った数ではなく**サーバが保存した数**を出す
@@ -3030,11 +3052,12 @@
             ? n + "か所を保存しました。判定をやり直します…"
             : n + "か所だけ保存しました（" + (changed - n) + "か所は保存できていません）。";
           if (r && r.warning) m.textContent += " " + r.warning;
+          if (n === changed) flashUpdated(m);
           // 直したら判定をやり直す（「足りない」が消えたかを、その場で見せる）
           netGo();
         }).catch(function (e) {
           m.className = "msg err"; m.textContent = e.message;
-        }).finally(function () { $("net-save").disabled = false; });
+        }).finally(function () { $("net-save").disabled = false; busyOff($("net-save")); });
       });
     }).catch(function () { /* 判定は既に出ている。ここが落ちても画面は使える */ });
 
