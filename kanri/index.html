@@ -359,6 +359,7 @@
            クラウド移行のとき、この画面だけ引き継がれずに消えていた
            （GAS側は書き込み凍結済みなので、PC版が押し出しても届かない状態だった）。 -->
       <button class="btn" data-go="today">
+        <span class="ic" aria-hidden="true">今</span>
         <span class="t">今日のやり取り<span class="d">PC版の今日のタスクを見る／その場で依頼を出す</span></span>
       </button>
     </div>
@@ -697,6 +698,9 @@
     //   商品管理のままだと役目を果たさない。
     "list": "商品一覧", "edit": "QRで探して直す", "netlist": "QRからネット出品",
     "queue": "出品リスト", "today": "今日のやり取り",
+    // 【2026-08-12 配線点検で発覚】settings だけ抜けていて、設定画面のヘッダが
+    // フォールバックの「商品管理」になっていた（壊れてはいないが、いまどこかが分からない）
+    "settings": "設定",
     "offline": "つながりませんでした"
   };
   var stack = [];
