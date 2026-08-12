@@ -31,6 +31,8 @@
     --bg: #f7f1e7; --fg: #2b2926; --accent: #83937d;
     --muted: #665e54; --line: #e8dec7; --card: #fefbf5; --card-raised: #ffffff;
     --ok: #2f7a4d; --danger: #812b45; --warn: #a9781d;
+    /* 【2026-08-12】タイルの丸い印に使う薄い面（セージ）と、お金まわりのテラコッタ */
+    --accent-soft: #e0e8d9; --attn: #b45b4b; --attn-bg: #f6dbcc;
     --shadow-subtle: 0 1px 2px rgba(43, 41, 38, 0.08);
     --shadow-card: 0 12px 24px -7px rgba(43, 41, 38, 0.16);
     --motion-press: 80ms; --motion-base: 160ms;
@@ -178,6 +180,20 @@
   #v-home .btn { min-height: 76px; padding: 16px 18px; margin-bottom: 12px; }
   #v-home .btn .t { font-size: 18px; line-height: 1.5; }
   #v-home .btn .d { font-size: 14px; line-height: 1.6; margin-top: 3px; }
+  /* 【2026-08-12 Figma C-01】タイル＝丸い印＋題＋説明＋進む印。
+     印は飾りではなく「何の画面か」を1文字で先に伝える（題を読む前に目に入る）。
+     お金まわり（売上）だけテラコッタ＝Figmaの区別をそのまま写した。 */
+  #v-home .btn .ic {
+    flex: 0 0 auto; width: 46px; height: 46px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; font-weight: 700;
+    background: var(--accent-soft); color: #4c5a46;
+  }
+  #v-home .btn .ic.money { background: var(--attn-bg); color: var(--attn); }
+  #v-home .btn::after {
+    content: "›"; flex: 0 0 auto; font-size: 26px; font-weight: 400;
+    color: var(--muted); line-height: 1;
+  }
   /* 🔴【2026-08-01・実機で発覚】もとは .btn.primary .t を flex:0 にしていた。
      .btn は横並び(flex)なので、子の幅が文字1つぶんまで潰れ、
      「はいる」が **は／い／る の3行**になって縦に伸びていた（実機スクショで確認）。
@@ -297,21 +313,26 @@
     </div>
     <div id="home-basic">
     <button class="btn" data-go="quickreg">
+      <span class="ic" aria-hidden="true">QR</span>
       <span class="t">QRを貼って登録する<span class="d">棚の前で、ラベルを貼って写真を撮る</span></span>
     </button>
     <button class="btn" data-go="sale">
+      <span class="ic money" aria-hidden="true">¥</span>
       <span class="t">売上を入れる<span class="d">レジで売れたものを記録する</span></span>
     </button>
     <button class="btn" data-go="pricing">
+      <span class="ic" aria-hidden="true">値</span>
       <span class="t">未値付けに値段をつける<span class="d">まだ値段の無いものを続けて</span></span>
     </button>
     <button class="btn" data-go="list">
+      <span class="ic" aria-hidden="true">探</span>
       <span class="t">商品を探す・直す<span class="d">QRを読む／言葉で探す／値段と補足を書く</span></span>
     </button>
     <!-- 🔴【2026-08-02・オーナー実機「毎回撮影かリーダーか聞かれると鬱陶しい」】
          読み方は**端末ごとに一度決めれば変わらない**もの。読むたびに選ばせない。
          ここで決めて覚え、QRの画面には小さな逃げ道だけ残す。 -->
     <button class="btn" data-go="settings">
+      <span class="ic" aria-hidden="true">設</span>
       <span class="t">設定<span class="d">QRの読み方（この端末だけ）</span></span>
     </button>
     <!-- 🔴 管理モードはオーナーだけ。ここを隠すのは**見やすさのため**であって、
@@ -320,15 +341,18 @@
     </div>
     <div id="home-admin" style="display:none;">
       <button class="btn" data-go="edit">
+        <span class="ic" aria-hidden="true">直</span>
         <span class="t">QRで探して直す（詳しく）<span class="d">商品名・カテゴリ・説明まで直す</span></span>
       </button>
       <button class="btn" data-go="netlist">
+        <span class="ic" aria-hidden="true">出</span>
         <span class="t">QRからネット出品<span class="d">出せるか確かめて、出品リストへ送る</span></span>
       </button>
       <!-- 🔴【2026-08-01・Codex監査6】管理モードは3つ（CLAUDE.md）だが2つしか無かった。
            ⚠️ ここは**見るだけ**にする。出す／出さないの判断はPC版が持つ
               （判断の位は owner_pc が最上位。スマホから決めると位が下の書込みになる）。 -->
       <button class="btn" data-go="queue">
+        <span class="ic" aria-hidden="true">覧</span>
         <span class="t">出品リスト<span class="d">いま送ってある品を見る（決めるのはPC版）</span></span>
       </button>
       <!-- 🔴【2026-08-04】2026-07-31のオーナー依頼をここへ戻した。
