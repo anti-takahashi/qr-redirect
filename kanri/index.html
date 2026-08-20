@@ -2458,7 +2458,11 @@
       // 🔴【2026-08-04】写真が横倒しのときに、その場で直せるようにする。
       //    ⚠️ 写真が無い品には出さない（押しても何も起きないボタンを並べない）。
       //    ⚠️ 小さめ・控えめにする。判断に要るのは値段とネット候補で、これは直しの道具。
-      (r.hasPhoto
+      // 🔴【2026-08-20 総検査】店舗ロールには出さない。受け口の rotateProductPhoto は
+      //    master 専用で、店舗ロールが押すと拒否（AUTH）＝セッションごと消されて入り直しになる
+      //    （3330行付近に記録した「店舗モードの人が master 専用の口を叩いて強制ログアウト」と同型）。
+      //    サーバ側の守りは既に在る＝これは「必ず失敗するボタンを共有面に見せない」ための表示側の直し。
+      (r.hasPhoto && IS_MASTER
         ? '<button type="button" class="btn lst-rot" style="margin:8px 0 0;">' +
           '<span class="t" style="font-size:15px;">写真を回す（90度）</span></button>'
         : "") +
@@ -2763,7 +2767,14 @@
               return r2;
             });
 
+      // 🔴【2026-08-20 総検査】値段と他項目を**同時に**直したとき、値段側が仮案
+      //    （proposal:true＝正本は未変更）で返っても、下の合流部が項目更新の結果しか
+      //    見ておらず「Nか所を保存しました。」だけ出ていた＝店頭価格が変わっていない
+      //    事実が握りつぶされる。値段の結果を持ち越して、必ずメッセージへ足す。
+      var priceResult = null;
+
       priceStep.then(function (pr) {
+        priceResult = pr;
         if (!changed) {
           // 値段だけ直した場合
           $("edt-save").disabled = false;
@@ -2796,6 +2807,13 @@
           m.textContent = n + "か所を保存しました。";
         }
         if (r && r.warning) m.textContent += " " + r.warning;
+        // 🔴 値段が仮案で止まっているなら、他の項目が全部保存できていても
+        //    「成功」の顔をさせない（値段は正本に書かれていない）。
+        if (priceResult && priceResult.proposal) {
+          m.className = "msg";
+          m.textContent += " " + String(priceResult.message ||
+            "値段はオーナーの判断があるため仮案として送りました（まだ変わっていません）。");
+        }
         // 🔴【2026-08-01・Fable5監査High-4】ここで再読込すると、同じ処理の中で
         //   $("edt-detail") が丸ごと差し替わり、**いま組み立てたメッセージが
         //   一度も描かれない**。部分保存の失敗や仮案送付の通知が誰にも見えず、

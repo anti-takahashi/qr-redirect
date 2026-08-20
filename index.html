@@ -312,7 +312,7 @@
 (function () {
   'use strict';
 
-  // GAS版カタログ（会員限定＝お気に入り・全商品ブラウズ）。**印刷済みQR518枚の宛先でもある**ので
+  // GAS版カタログ（会員限定＝お気に入り・全商品ブラウズ）。**印刷済みQRラベルの宛先でもある**ので
   // このURLは変えない。ここからはリンクするだけで、表示には一切使わない。
   var GAS_EXEC_URL = 'https://script.google.com/macros/s/AKfycbxAOpYw6XwevYwLFEahsEvKJfqkxnACdrtpsWaWSFqWR-ltooiVGfLMBwJe6bABSJN1/exec';
 
@@ -439,8 +439,12 @@
 
   // ---- 画面 ----------------------------------------------------------------
   function statusInfo(stockStatus) {
-    // 売約済は在庫あり扱い（仮押さえ機能は2026-07-14廃止済み）。SOLDだけを出す。
     if (stockStatus === 'SOLD') return { label: 'SOLD', cls: 'sold' };
+    // 🔴【2026-08-20 総検査】売約済（押さえてある品）は受け口が値段を伏せて（price:null）
+    //    送ってくる（2026-08-07 オーナー決定「見せるが値段は伏せる」）。ここで拾わないと
+    //    下の価格行が null を「価格応談」と読み替え、**押さえ済みの品で商談が始まる**
+    //    （押さえた客との二重売却の芽）。交渉できる品ではないので、そのまま「売約済」と出す。
+    if (stockStatus === '売約済') return { label: '売約済', cls: 'sold' };
     return null;
   }
 
@@ -485,8 +489,12 @@
       : '<div class="price-line">' + (item.price ? yen(item.price) : '価格応談') + '</div>';
 
     var kept = isKept(token);
-    var cartBtn = '<button type="button" class="cart-btn' + (kept ? ' on' : '') + '" id="cart-btn">' +
-      (kept ? '✓ 候補に入れた' : '候補に入れる') + '</button>';
+    // 🔴 買えない品（SOLD・売約済）は候補に入れさせない（値段の無い品が候補合計へ入り、
+    //    レジ前で「価格応談」と誤解される道をここで閉じる）。
+    var cartBtn = st
+      ? '<button type="button" class="cart-btn" disabled>' + st.label + 'のため候補に入れられません</button>'
+      : '<button type="button" class="cart-btn' + (kept ? ' on' : '') + '" id="cart-btn">' +
+        (kept ? '✓ 候補に入れた' : '候補に入れる') + '</button>';
 
     var totals = cartTotals(loadCart());
     var cartOpen = totals.count > 0

@@ -108,6 +108,8 @@
     touch-action: manipulation;
   }
   .btn.line { background: var(--line-green); color: #fff; border-color: var(--line-green); }
+  /* 主ボタン（送信など）＝ブランドのセージ。LINE緑と役割を分ける（2026-08-20 総検査） */
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
   /* 押した瞬間に1px沈む（HANDOFF §6・スマホはhoverに依存しない） */
   .btn:active, .item:active { transform: translateY(1px) scale(.985); transition-duration: 60ms; }
   .btn:focus-visible, .fav:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
@@ -248,7 +250,9 @@
       <label class="f" style="margin-top:10px;"><span style="font-weight:700;">性別</span>
         <select class="input" id="sv-gender"></select></label>
 
-      <button class="btn line" id="sv-send" type="button" style="margin-top:16px;">送信する</button>
+      <!-- 🔴【2026-08-20 総検査】LINE緑はLINEへの遷移ボタンだけ（28行の決めごと・HANDOFF正本）。
+           送信＝LINEは開かないので通常の主ボタンにする（緑だと「押すとLINEが開く」と誤解される）。 -->
+      <button class="btn primary" id="sv-send" type="button" style="margin-top:16px;">送信する</button>
       <!-- 🔴【Codex監査(2周目)6】「あとで」と書いていたが、押すとサーバに回答済み印が付き
            **二度と聞かれない**。実態に合う言葉にする（後から聞き直す仕組みは持たない）。 -->
       <button class="btn" id="sv-skip" type="button">今回は答えない</button>
@@ -453,7 +457,12 @@
     //   「拡大が閉じる」と「詳細→一覧へ戻る」が同時に起きていた。
     //   ここで先に処理して、画面のスタックは動かさない。
     if (ZOOM_CLOSE) { ZOOM_CLOSE(); pushHistory(); return; }
-    if (stack.length <= 1) { pushHistory(); return; }
+    // 🔴【2026-08-20 総検査】最下層では**外へ返す**。以前はここで pushHistory() し直して
+    //   離脱を止めていたが、catalog-site は「ブラウザの戻るで商品ページへ戻れる」前提で
+    //   新規タブを廃止済み（2026-08-04 オーナー実機決定）＝ここで堰き止めると
+    //   ☆お気に入りで来た客が何度戻っても商品ページへ帰れず、QRを読み直すしかなくなる。
+    //   読み込み時に1枚積んでいる（1211行付近）ので、もう1歩戻って来た元のページへ返す。
+    if (stack.length <= 1) { try { history.back(); } catch (e) {} return; }
     // 🔴【Codex監査(4周目)4】ここで stack.pop() を書き写していたので、
     //   back() の中の「詳細から離れたら世代を進める」が効かなかった。
     //   端末の戻りで一覧へ帰ったあとに詳細の応答が届き、見ていない品が
@@ -853,7 +862,9 @@
   $("favonly").addEventListener("click", function () {
     FAV_ONLY = !FAV_ONLY;
     $("favonly").textContent = FAV_ONLY ? "♥ お気に入りだけ（もどす）" : "♡ お気に入りだけ見る";
-    $("favonly").style.borderColor = FAV_ONLY ? "#e0245e" : "";
+    // 🔴【2026-08-20 総検査】#e0245e は2026-08-12に排除した借り物の色。最後の1か所を
+    //   ♥と同じテラコッタ（--attn）へ揃える（1色1意味・記録と実物を一致させる）。
+    $("favonly").style.borderColor = FAV_ONLY ? "var(--attn)" : "";
     LIST_SCROLL = 0;
     applyFilter();
   });
@@ -1084,7 +1095,11 @@
 
   // 写真を大きく見る。閉じ方は「どこを押しても閉じる」＋端末の戻る。
   function openZoom(src) {
-    var big = String(src || "").replace(/=w\d+$/, "=w1000");
+    // 🔴【2026-08-20 総検査】出どころが2通りある（受け口の `?px=` と、旧CDNの `=w1000`）。
+    //   catalog-site は両対応済みで、ここだけ旧CDN形式にしか効かない死配線だった
+    //   （受け口が px=400 等へ軽量化した瞬間、拡大が無言で効かなくなる）。
+    var big = String(src || "").replace(/=w\d+$/, "=w1000")
+      .replace(/([?&])px=\d+/, "$1px=1000");
     var ov = document.createElement("div");
     ov.setAttribute("style",
       "position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.92);" +
