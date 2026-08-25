@@ -328,6 +328,13 @@
       <span class="ic" aria-hidden="true">探</span>
       <span class="t">商品を探す・直す<span class="d">QRを読む／言葉で探す／値段と補足を書く</span></span>
     </button>
+    <!-- 🔴【2026-08-25 オーナー決定】ネット出品の直ルート。
+         QRを貼らず・カタログにも載せず、ネットだけに出す品の入口。
+         ⚠️ 「QRを貼って登録する」とは別の入口。棚に入れる品はそちらを使う。 -->
+    <button class="btn" data-go="netdirect">
+      <span class="ic" aria-hidden="true">ネ</span>
+      <span class="t">ネットだけに出す<span class="d">棚に置かない品。写真と大きさを入れて出品リストへ</span></span>
+    </button>
     <!-- 🔴【2026-08-02・オーナー実機「毎回撮影かリーダーか聞かれると鬱陶しい」】
          読み方は**端末ごとに一度決めれば変わらない**もの。読むたびに選ばせない。
          ここで決めて覚え、QRの画面には小さな逃げ道だけ残す。 -->
@@ -409,6 +416,74 @@
       <div class="msg" id="qr-msg"></div>
     </div>
     <div id="qr-form"></div>
+  </section>
+  <!-- ネットだけに出す（2026-08-25 オーナー決定・直ルート）
+       🔴 QRラベルは貼らない／カタログにも載せない。棚に置かずネットだけに出す品。
+          ⚠️ 値段はここでは付けない（PC版でオーナーが付ける）。
+          ⚠️ 出す先はヤフオクかメルカリのどちらか一つ。両方へは出さない。 -->
+  <section class="view" id="v-netdirect">
+    <div class="card">
+      <h2>ネットだけに出す</h2>
+      <p class="d" style="margin:0 0 10px;">棚に置かない品です。写真と大きさを入れると、出品リストへ入ります。
+        値段はパソコンで付けます。</p>
+
+      <div class="msg" id="nd-msg"></div>
+
+      <!-- ① 写真 -->
+      <div id="nd-step1" style="display:none;">
+        <label class="f"><span>① 写真をとる（何枚でも）</span></label>
+        <input type="file" id="nd-files" accept="image/jpeg,image/png" multiple capture="environment"
+               style="width:100%;min-height:56px;">
+        <div class="msg" id="nd-photo-msg"></div>
+        <div id="nd-photo-count" class="d" style="margin:6px 0 12px;">まだ1枚も入っていません</div>
+
+        <!-- ② 大きさ -->
+        <label class="f">
+          <span>② 大きさ（たて・よこ・高さ など）</span>
+          <input type="text" id="nd-dim" autocomplete="off" placeholder="例: 高さ25cm 幅18cm">
+        </label>
+
+        <!-- ③ 送り方 -->
+        <label class="f">
+          <span>③ 送るときの大きさ</span>
+          <select id="nd-ship" style="min-height:56px;font-size:16px;">
+            <option value="">選んでください</option>
+            <option value="60">60サイズ</option>
+            <option value="80">80サイズ</option>
+            <option value="100">100サイズ</option>
+            <option value="120">120サイズ</option>
+            <option value="140">140サイズ</option>
+            <option value="160">160サイズ</option>
+            <option value="家財便">家財便（大きい家具）</option>
+            <!-- 🔴 セット品を1点ぶんの採寸から決めない（140サイズに火鉢2つは入らない）。
+                 迷ったらこれを選べば、オーナーが決める。 -->
+            <option value="複数点セット＝問い合わせ">複数点セット／わからない</option>
+          </select>
+        </label>
+
+        <!-- ④ メモ -->
+        <label class="f">
+          <span>④ メモ（気づいたこと・傷・付属品など）</span>
+          <textarea id="nd-memo" rows="3" placeholder="例: ふたの内側に小さな欠けあり"></textarea>
+        </label>
+
+        <!-- ⑤ 出す先 -->
+        <label class="f">
+          <span>⑤ どこに出すか（どちらか一つ）</span>
+          <select id="nd-dest" style="min-height:56px;font-size:16px;">
+            <option value="">選んでください</option>
+            <option value="ヤフオク">ヤフオク</option>
+            <option value="メルカリ">メルカリ</option>
+          </select>
+        </label>
+
+        <button class="btn primary" id="nd-submit" type="button" style="min-height:56px;">
+          <span class="t" style="text-align:center;">出品リストへ送る</span></button>
+      </div>
+
+      <button class="btn" id="nd-start" type="button" style="min-height:56px;">
+        <span class="t" style="text-align:center;">はじめる</span></button>
+    </div>
   </section>
   <!-- 売上を入れる: QRを続けて読んで「かご」に貯め、まとめて会計する -->
   <section class="view" id="v-sale">
@@ -3206,6 +3281,124 @@
     var m = /\.(jpe?g|png)$/i.exec(String(n || ""));
     return m ? m[0].toLowerCase() : ".jpg";
   }
+
+  // ── ネットだけに出す（直ルート・2026-08-25 オーナー決定）──────────────
+  // 🔴 QRラベルを貼らず、カタログにも載せない。棚に入れない品の入口。
+  //    値段はここで付けない（PC版でオーナーが付ける＝位が上）。
+  //    出す先はヤフオクかメルカリのどちらか一つ（自社ECへは出さない）。
+  var ND = { id: "", photos: 0 };
+
+  function ndSay(el, cls, text) {
+    var m = $(el); if (!m) return;
+    m.className = "msg" + (cls ? " " + cls : "");
+    m.textContent = text;
+  }
+
+  function ndReset() {
+    ND = { id: "", photos: 0 };
+    if (!$("nd-step1")) return;
+    $("nd-step1").style.display = "none";
+    $("nd-start").style.display = "";
+    ndSay("nd-msg", "", "");
+    ndSay("nd-photo-msg", "", "");
+    $("nd-photo-count").textContent = "まだ1枚も入っていません";
+    $("nd-files").value = "";
+    $("nd-dim").value = "";
+    $("nd-ship").value = "";
+    $("nd-memo").value = "";
+    $("nd-dest").value = "";
+  }
+
+  // ① 先に番号だけ取る。写真は `{番号}/net/` へ入れるので、番号が先に要る。
+  function ndStart() {
+    ndSay("nd-msg", "", "番号を用意しています…");
+    call("netDirectAllocate", {}).then(function (r) {
+      ND.id = String((r && r.masterId) || "");
+      if (!ND.id) throw new Error("番号を取れませんでした");
+      $("nd-start").style.display = "none";
+      $("nd-step1").style.display = "";
+      ndSay("nd-msg", "ok", "番号 " + ND.id + " を用意しました。写真をとってください。");
+    }).catch(function (e) {
+      ndSay("nd-msg", "err", (e && e.message) || "うまくいきませんでした");
+    });
+  }
+
+  // ② 写真。1枚ずつ順に送る（まとめて投げると、途中で落ちたとき何が入ったか分からない）
+  function ndPhotos(files) {
+    if (!files || !files.length) return;
+    if (!ND.id) { ndSay("nd-photo-msg", "err", "先に「はじめる」を押してください"); return; }
+    var done = 0, failed = 0;
+    ndSay("nd-photo-msg", "", "送っています… 0/" + files.length);
+    (function next(i) {
+      if (i >= files.length) {
+        ND.photos += done;
+        ndSay("nd-photo-msg", failed ? "err" : "ok",
+          failed ? (done + "枚を入れました（" + failed + "枚は入りませんでした）。")
+                 : (done + "枚を入れました。"));
+        $("nd-photo-count").textContent = ND.photos
+          ? ("いまのところ " + ND.photos + "枚 入っています")
+          : "まだ1枚も入っていません";
+        $("nd-files").value = "";
+        return;
+      }
+      var fr = new FileReader();
+      fr.onload = function () {
+        call("netDirectPhoto", {
+          masterId: ND.id,
+          fileName: "net-" + Date.now() + "-" + i + nameExt(files[i].name),
+          dataBase64: String(fr.result || "")
+        }).then(function () { done += 1; })
+          .catch(function () { failed += 1; })
+          .finally(function () {
+            ndSay("nd-photo-msg", "", "送っています… " + (done + failed) + "/" + files.length);
+            next(i + 1);
+          });
+      };
+      fr.onerror = function () { failed += 1; next(i + 1); };
+      fr.readAsDataURL(files[i]);
+    })(0);
+  }
+
+  // ③ 確定。ここで正本の行と出品リストの行ができる（受け口が1つのまとまりで作る）
+  function ndSubmit() {
+    if (!ND.id) { ndSay("nd-msg", "err", "先に「はじめる」を押してください"); return; }
+    // 🔴 画面でも一度見るが、**断るのは受け口**（画面の作りに守りを預けない）
+    if (!ND.photos) { ndSay("nd-msg", "err", "写真を少なくとも1枚は入れてください"); return; }
+    var dim = String($("nd-dim").value || "").trim();
+    var ship = String($("nd-ship").value || "").trim();
+    var memo = String($("nd-memo").value || "").trim();
+    var dest = String($("nd-dest").value || "").trim();
+    if (!dim) { ndSay("nd-msg", "err", "大きさを入れてください"); return; }
+    if (!ship) { ndSay("nd-msg", "err", "送るときの大きさを選んでください"); return; }
+    if (!dest) { ndSay("nd-msg", "err", "どこに出すかを選んでください"); return; }
+
+    ndSay("nd-msg", "", "送っています…");
+    call("netDirectSubmit", {
+      masterId: ND.id, dimensions: dim, shipSize: ship, memo: memo, dest: dest
+    }).then(function (r) {
+      var id = String((r && r.masterId) || ND.id);
+      ndSay("nd-msg", "ok", id + " を出品リストへ入れました。値段はパソコンで付けます。");
+      // 続けて次の品へ進めるように、番号を空にして最初の状態へ戻す
+      ND = { id: "", photos: 0 };
+      $("nd-step1").style.display = "none";
+      $("nd-start").style.display = "";
+      $("nd-files").value = "";
+      $("nd-dim").value = ""; $("nd-ship").value = ""; $("nd-memo").value = ""; $("nd-dest").value = "";
+      $("nd-photo-count").textContent = "まだ1枚も入っていません";
+      ndSay("nd-photo-msg", "", "");
+    }).catch(function (e) {
+      ndSay("nd-msg", "err", (e && e.message) || "うまくいきませんでした");
+    });
+  }
+
+  (function ndWire() {
+    var s = $("nd-start"); if (s) s.addEventListener("click", ndStart);
+    var f = $("nd-files"); if (f) f.addEventListener("change", function () { ndPhotos(this.files); });
+    var b = $("nd-submit"); if (b) b.addEventListener("click", ndSubmit);
+    // タイルを押して入ったときは最初の状態から始める（前の品の入力を持ち越さない）
+    var tile = document.querySelector('[data-go="netdirect"]');
+    if (tile) tile.addEventListener("click", ndReset);
+  })();
 
   function netGo() {
     var seq = bumpSeq("net");
