@@ -431,9 +431,18 @@
 
       <!-- ① 写真 -->
       <div id="nd-step1" style="display:none;">
-        <label class="f"><span>① 写真をとる（何枚でも）</span></label>
-        <input type="file" id="nd-files" accept="image/jpeg,image/png" multiple capture="environment"
-               style="width:100%;min-height:56px;">
+        <label class="f"><span>① 写真（何枚でも）</span></label>
+        <!-- 🔴【2026-08-25 オーナー実機】1つの入力に capture を付けると**カメラにしか行けない**。
+             撮るのと選ぶのは別の入力に分ける（同じ入力で兼ねられない）。
+             ⚠️ 入力そのものは隠し、押す先は大きなボタンにする（店舗モードは指で押す）。 -->
+        <button class="btn" id="nd-shoot" type="button" style="min-height:56px;">
+          <span class="t" style="text-align:center;">写真を撮る</span></button>
+        <button class="btn" id="nd-pick" type="button" style="min-height:56px;">
+          <span class="t" style="text-align:center;">ライブラリから選ぶ</span></button>
+        <input type="file" id="nd-files" accept="image/*" capture="environment"
+               style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;">
+        <input type="file" id="nd-files-lib" accept="image/jpeg,image/png" multiple
+               style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;">
         <div class="msg" id="nd-photo-msg"></div>
         <div id="nd-photo-count" class="d" style="margin:6px 0 12px;">まだ1枚も入っていません</div>
 
@@ -3303,6 +3312,7 @@
     ndSay("nd-photo-msg", "", "");
     $("nd-photo-count").textContent = "まだ1枚も入っていません";
     $("nd-files").value = "";
+    $("nd-files-lib").value = "";
     $("nd-dim").value = "";
     $("nd-ship").value = "";
     $("nd-memo").value = "";
@@ -3338,7 +3348,9 @@
         $("nd-photo-count").textContent = ND.photos
           ? ("いまのところ " + ND.photos + "枚 入っています")
           : "まだ1枚も入っていません";
+        // 🔴 両方とも空にする。同じ写真を選び直したとき change が出ないため
         $("nd-files").value = "";
+        $("nd-files-lib").value = "";
         return;
       }
       var fr = new FileReader();
@@ -3393,7 +3405,13 @@
 
   (function ndWire() {
     var s = $("nd-start"); if (s) s.addEventListener("click", ndStart);
-    var f = $("nd-files"); if (f) f.addEventListener("change", function () { ndPhotos(this.files); });
+    // 撮るのと選ぶのは別の入力。押す先はボタンで、入力は隠してある
+    var shoot = $("nd-shoot"), pick = $("nd-pick");
+    var f = $("nd-files"), fl = $("nd-files-lib");
+    if (shoot && f) shoot.addEventListener("click", function () { f.click(); });
+    if (pick && fl) pick.addEventListener("click", function () { fl.click(); });
+    if (f) f.addEventListener("change", function () { ndPhotos(this.files); });
+    if (fl) fl.addEventListener("change", function () { ndPhotos(this.files); });
     var b = $("nd-submit"); if (b) b.addEventListener("click", ndSubmit);
     // タイルを押して入ったときは最初の状態から始める（前の品の入力を持ち越さない）
     var tile = document.querySelector('[data-go="netdirect"]');
