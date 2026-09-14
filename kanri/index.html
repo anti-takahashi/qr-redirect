@@ -333,7 +333,7 @@
          ⚠️ 「QRを貼って登録する」とは別の入口。棚に入れる品はそちらを使う。 -->
     <button class="btn" data-go="netdirect">
       <span class="ic" aria-hidden="true">ネ</span>
-      <span class="t">ネットだけに出す<span class="d">棚に置かない品。写真と大きさを入れて出品リストへ</span></span>
+      <span class="t">ネットだけに出す<span class="d">棚に置かない品。写真・大きさ・商品名・値段を入れてCSV待ちへ</span></span>
     </button>
     <!-- 🔴【2026-08-02・オーナー実機「毎回撮影かリーダーか聞かれると鬱陶しい」】
          読み方は**端末ごとに一度決めれば変わらない**もの。読むたびに選ばせない。
@@ -424,8 +424,12 @@
   <section class="view" id="v-netdirect">
     <div class="card">
       <h2>ネットだけに出す</h2>
-      <p class="d" style="margin:0 0 10px;">棚に置かない品です。写真と大きさを入れると、出品リストへ入ります。
-        値段はパソコンで付けます。</p>
+      <!-- 🔴【2026-09-15 オーナー決定】商品名と値段もここで入れる。
+           オーナーの鍵で送ると、全部埋まっていればそのまま「CSV待ち」へ入る（パソコン操作なし）。
+           足りなければ足りない状態で止まり、パソコンで残りを入れる。
+           店舗の鍵（父・手伝い）からは今までどおりオーナーの確認待ちで止まる。 -->
+      <p class="d" style="margin:0 0 10px;">棚に置かない品です。写真・大きさ・商品名・値段・出す先を入れて送ると、
+        出品リストの「CSV待ち」まで一度に進みます。商品名か値段が空なら、そこで止まります（あとでパソコンで入れられます）。</p>
 
       <div class="msg" id="nd-msg"></div>
 
@@ -484,6 +488,18 @@
             <option value="ヤフオク">ヤフオク</option>
             <option value="メルカリ">メルカリ</option>
           </select>
+        </label>
+
+        <!-- ⑥ 商品名・⑦ 値段（2026-09-15 オーナー決定・ここで入れれば CSV待ちまで一度に進む）
+             ⚠️ 商品名は短くてよい（出品の題名はCSVを作るときに写真から整える）。
+             ⚠️ 値段は数字だけ。ここが確定価格になる（ヤフオク・メルカリの手数料ぶんはCSVを作るときに乗せる）。 -->
+        <label class="f">
+          <span>⑥ 商品名（短くてよい・空ならあとでパソコンで）</span>
+          <input type="text" id="nd-name" autocomplete="off" maxlength="65" placeholder="例: 木彫 大黒様">
+        </label>
+        <label class="f">
+          <span>⑦ 値段（円・数字だけ・空ならあとでパソコンで）</span>
+          <input type="text" id="nd-price" inputmode="numeric" autocomplete="off" placeholder="例: 5500">
         </label>
 
         <button class="btn primary" id="nd-submit" type="button" style="min-height:56px;">
@@ -3317,6 +3333,8 @@
     $("nd-ship").value = "";
     $("nd-memo").value = "";
     $("nd-dest").value = "";
+    if ($("nd-name")) $("nd-name").value = "";
+    if ($("nd-price")) $("nd-price").value = "";
   }
 
   // ① 先に番号だけ取る。写真は `{番号}/net/` へ入れるので、番号が先に要る。
@@ -3383,19 +3401,27 @@
     if (!dim) { ndSay("nd-msg", "err", "大きさを入れてください"); return; }
     if (!ship) { ndSay("nd-msg", "err", "送るときの大きさを選んでください"); return; }
     if (!dest) { ndSay("nd-msg", "err", "どこに出すかを選んでください"); return; }
+    // 2026-09-15: 商品名と値段。どちらも空でよい（空なら受け口が「足りない」状態で止める）
+    var name = String(($("nd-name") && $("nd-name").value) || "").trim();
+    var price = String(($("nd-price") && $("nd-price").value) || "").replace(/[,\s円]/g, "");
+    if (price && !/^\d+$/.test(price)) { ndSay("nd-msg", "err", "値段は数字だけで入れてください（例: 5500）"); return; }
 
     ndSay("nd-msg", "", "送っています…");
     call("netDirectSubmit", {
-      masterId: ND.id, dimensions: dim, shipSize: ship, memo: memo, dest: dest
+      masterId: ND.id, dimensions: dim, shipSize: ship, memo: memo, dest: dest,
+      name: name, price: price
     }).then(function (r) {
       var id = String((r && r.masterId) || ND.id);
-      ndSay("nd-msg", "ok", id + " を出品リストへ入れました。値段はパソコンで付けます。");
+      // 🔴 どこまで進んだかは**受け口が言った状態**をそのまま出す（画面で言い切らない）
+      ndSay("nd-msg", "ok", String((r && r.message) || (id + " を出品リストへ入れました。")));
       // 続けて次の品へ進めるように、番号を空にして最初の状態へ戻す
       ND = { id: "", photos: 0 };
       $("nd-step1").style.display = "none";
       $("nd-start").style.display = "";
       $("nd-files").value = "";
       $("nd-dim").value = ""; $("nd-ship").value = ""; $("nd-memo").value = ""; $("nd-dest").value = "";
+      if ($("nd-name")) $("nd-name").value = "";
+      if ($("nd-price")) $("nd-price").value = "";
       $("nd-photo-count").textContent = "まだ1枚も入っていません";
       ndSay("nd-photo-msg", "", "");
     }).catch(function (e) {
