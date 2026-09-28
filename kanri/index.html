@@ -866,10 +866,36 @@
     $("back").style.display = (stack.length > 1 && name !== "pin" && name !== "nokey") ? "flex" : "none";
     window.scrollTo(0, 0);
   }
+  // 🔴【2026-09-28 監査00・C01・11】詳細（sch-detail）や「直しに行く」の先で保存したあと
+  //   「←」で戻ると、一覧のカードが古い値段・古い版数のまま残っていた
+  //   （出品リスト／商品を探す／未値付け／QRからネット出品の判定、の4つ）。
+  //   古い版数のカードで次に押すと必ず「ほかの人がさきに直しています」で弾かれる。
+  //   → 保存が**本当に通ったとき**だけ印を付け、戻った先に印があれば読み直す。
+  //   ⚠️ 読み直すのは下の4つの一覧・判定だけ。入力途中の画面（edit/search/sale/quickreg）は
+  //      読み直さない（書きかけが消える）。印が無ければ読み直さない（位置も入力も保つ）。
+  var STALE = {};
+  function markStale() { STALE.queue = STALE.list = STALE.pricing = STALE.netlist = true; }
+  function refreshIfStale(name) {
+    if (!STALE[name]) return;
+    STALE[name] = false;
+    try {
+      if (name === "queue") loadQueue();
+      else if (name === "pricing") loadPricing();
+      // ONSHOW["list"] は1ページ目へ戻すので使わない（いたページのまま読み直す）
+      else if (name === "list") loadList(LST.page, false);
+      else if (name === "netlist" && NET_CUR) netGo();
+    } catch (e) { /* 表示は既に出ている */ }
+  }
+  // 「←」と端末の戻るは**同じ関数**を通す（片方だけ直す、を起こさない）
+  function goBack() {
+    stack.pop();
+    var name = stack[stack.length - 1];
+    show(name, false);
+    refreshIfStale(name);
+  }
   $("back").addEventListener("click", function () {
     if (stack.length <= 1) return;
-    stack.pop();
-    show(stack[stack.length - 1], false);
+    goBack();
   });
 
   // 🔴 端末の戻る（ジェスチャー）も同じ道を通す。
@@ -884,8 +910,7 @@
   }
   window.addEventListener("popstate", function () {
     if (stack.length <= 1) { pushHistory(); return; }
-    stack.pop();
-    show(stack[stack.length - 1], false);
+    goBack();
     pushHistory();
   });
 
@@ -902,6 +927,7 @@
     (function (b) {
       b.addEventListener("click", function () {
         var name = b.getAttribute("data-go");
+        STALE[name] = false;   // この入り方は下の ONSHOW が読み直す（戻ったときに二度読まない）
         // 🔴 QR登録だけは**画面を出さずに飛ぶ**（用意が済んでいれば1タップ）。
         //    間に合っていないときだけ画面を出して、何が起きているかを見せる。
         go(name);
@@ -1498,7 +1524,7 @@
         'placeholder="例: 7800（空欄でも登録できます）"></label>' +
         '<label class="f"><span>補足メモ（任意）</span>' +
         '<textarea id="reg-note" rows="3" style="width:100%;min-height:88px;padding:10px 12px;' +
-        'border:1px solid var(--line);border-radius:12px;font:inherit;background:#fff;' +
+        'border:1px solid var(--line);border-radius:12px;background:#fff;' +
         'color:var(--fg);" placeholder="傷・サイズ・正しい商品名など"></textarea></label>' +
         // 🔴 保管場所は**選択式**。既定は「店舗」で、前回選んだ場所を引き継ぐ
         //    （毎回同じ場所を打たせない。オーナー指示 2026-08-02）。
@@ -2013,7 +2039,8 @@
         'object-fit:contain; border-radius:12px; background:#e8dec7; margin-bottom:12px;">' +
         "<h2>" + esc(d["商品名"] || masterId) + "</h2>" +
         '<div class="sub" style="margin-bottom:10px;">' + esc(masterId) +
-        "　" + (d["店頭価格"] === "" || d["店頭価格"] == null ? "値段まだ" : yen(d["店頭価格"])) +
+        '　<span id="sch-price-now">' +
+        (d["店頭価格"] === "" || d["店頭価格"] == null ? "値段まだ" : esc(yen(d["店頭価格"]))) + "</span>" +
         "　" + esc(d["在庫ステータス"] || "") + "</div>" +
         // 🔴【2026-08-01・Codex監査(3周目)3】保管場所を**画面に出す**。
         //   サーバは返すようにしたのに表示していなかった＝「父が現物を探せるように」という
@@ -2048,12 +2075,13 @@
         '<input type="number" id="sch-price" inputmode="numeric" min="1" value="' +
         (d["店頭価格"] === "" || d["店頭価格"] == null ? "" : esc(d["店頭価格"])) + '"></label>' +
         '<button type="button" class="btn primary" id="sch-price-save" ' +
-        'style="width:auto; min-width:104px; margin:0;"><span class="t">直す</span></button>' +
+        'style="width:auto; min-width:104px; margin:0;"><span class="t">' +
+        (d["店頭価格"] === "" || d["店頭価格"] == null ? "つける" : "直す") + "</span></button>" +
         "</div>" +
         '<div class="msg" id="sch-price-msg"></div>' +
         '<label class="f"><span>補足（気づいたことを足していく）</span>' +
         '<textarea id="sch-memo" rows="5" style="width:100%;min-height:120px;padding:10px 12px;' +
-        'border:1px solid var(--line);border-radius:12px;font:inherit;background:#fff;' +
+        'border:1px solid var(--line);border-radius:12px;background:#fff;' +
         'color:var(--fg);">' + esc(memo) + "</textarea></label>" +
         '<button class="btn primary" id="sch-save" type="button"><span class="t">補足を保存する</span></button>' +
         '<div class="msg" id="sch-save-msg"></div>' +
@@ -2084,15 +2112,23 @@
 
       // 値段を直す。🔴 版数はこのカードが持っているものを使い、成功したら**取り直す**
       //   （取り直さないと、続けて補足を保存したときに必ず版数不一致で拒否される）。
+      // 🔴【2026-09-28 監査C00】値段の無い品で storeChangePrice を呼ぶと、受け口が必ず
+      //   「まだ値段がありません。未値付けからつけてください」で断る。未値付けの画面から
+      //   開いた品でも同じ詳細が開くので、案内が自分のいた画面へ押し戻すだけになっていた。
+      //   → 値段が空なら setStorePrice（つける）、あれば storeChangePrice（直す）。
+      //   ⚠️ つけたあと同じ画面でもう一度押すのは「直す」＝ hasPrice を倒す。
+      var hasPrice = !(d["店頭価格"] === "" || d["店頭価格"] == null);
       $("sch-price-save").addEventListener("click", function () {
         var pm = $("sch-price-msg");
         var p = Number($("sch-price").value || 0);
         if (!p || p < 1) { pm.className = "msg err"; pm.textContent = "値段を入れてください。"; return; }
         var pb = $("sch-price-save");
+        var setting = !hasPrice;
         pb.disabled = true;
         busyOn(pb);
-        pm.className = "msg"; pm.textContent = "直しています…";
-        call("storeChangePrice", { masterId: masterId, price: p, expectedRev: rev })
+        pm.className = "msg"; pm.textContent = setting ? "つけています…" : "直しています…";
+        call(setting ? "setStorePrice" : "storeChangePrice",
+             { masterId: masterId, price: p, expectedRev: rev })
           .then(function (res) {
             // 🔴 正本が変わっていないのに成功と言わない（一覧と同じ扱い）。
             //   上位者の判断がある品はサーバが proposal:true を返し、値段は書き換えない。
@@ -2103,9 +2139,16 @@
               return;
             }
             pm.className = "msg ok";
-            pm.textContent = "直しました。オーナーの画面にも出ます。";
+            pm.textContent = (setting ? "つけました（" : "直しました（") + yen(p) +
+              "）。オーナーの画面にも出ます。";
             flashUpdated(pm);
             if (res && res.rev != null) rev = res.rev;   // 補足の保存が拒否されないように
+            hasPrice = true;
+            var now = document.getElementById("sch-price-now");
+            if (now) now.textContent = yen(p);
+            var pt = pb.querySelector(".t");
+            if (pt) pt.textContent = "直す";
+            markStale();   // 戻った先の一覧を読み直す（古い値段・古い版数を残さない）
           }).catch(function (e) {
             pm.className = "msg err"; pm.textContent = e.message;
           }).finally(function () { pb.disabled = false; busyOff(pb); });
@@ -2126,6 +2169,7 @@
           m.className = "msg ok";
           m.textContent = "保存しました。";
           flashUpdated(m);
+          markStale();   // 戻った先の一覧は古い版数を持っている＝読み直させる
           // 🔴【2026-08-01・Fable5監査High-4】すぐ再読込すると、同じ処理の中で
           //   画面全体が差し替わるため**「保存しました。」が一度も描かれない**。
           //   店舗モードは「保存できたことをはっきり見せる」が要件なので、
@@ -2841,7 +2885,7 @@
       h += '<label class="f"><span>' + esc(name) + "</span>";
       if (kind === "textarea") {
         h += '<textarea data-f="' + esc(name) + '" rows="4" style="width:100%;min-height:96px;' +
-             'padding:10px 12px;border:1px solid var(--line);border-radius:12px;font:inherit;' +
+             'padding:10px 12px;border:1px solid var(--line);border-radius:12px;' +
              'background:#fff;color:var(--fg);">' + esc(v) + "</textarea>";
       } else if (kind === "select") {
         h += '<select data-f="' + esc(name) + '" class="input" style="width:100%;min-height:52px;">' +
@@ -2905,8 +2949,12 @@
       busyOn($("edt-save"));
       m.className = "msg"; m.textContent = "保存しています…";
 
+      // 🔴【2026-09-28 監査C00と同じ原因】値段が空の品は storeChangePrice では必ず断られる。
+      //   空なら setStorePrice（つける）、あれば storeChangePrice（直す）。
+      var hadPrice = !(d["店頭価格"] == null || String(d["店頭価格"]).trim() === "");
       var priceStep = (newPrice === null) ? Promise.resolve(null)
-        : call("storeChangePrice", { masterId: masterId, price: newPrice, expectedRev: rev })
+        : call(hadPrice ? "storeChangePrice" : "setStorePrice",
+               { masterId: masterId, price: newPrice, expectedRev: rev })
             .then(function (r2) {
               // 値段を書くと版数が上がる。**続く項目更新へ新しい版数を渡す**
               if (r2 && r2.rev != null) { rev = r2.rev; patch.__expectedRev = r2.rev; }
@@ -2927,7 +2975,8 @@
           m.className = (pr && pr.proposal) ? "msg" : "msg ok";
           m.textContent = (pr && pr.proposal)
             ? String(pr.message || "オーナーの判断があるため、仮案として送りました。")
-            : "値段を直しました。";
+            : (hadPrice ? "値段を直しました。" : "値段をつけました。");
+          if (!(pr && pr.proposal)) markStale();   // 戻った先の一覧・判定を読み直させる
           var kept = m.textContent, keptC = m.className;
           editOpen(masterId, undefined, function () {
             var m3 = $("edt-save-msg");
@@ -2944,6 +2993,8 @@
         //   保存できたように見えた（実際 "実寸サイズ" は存在しない列で、ずっと捨てられていた）。
         var saved = (r && r.saved) || [];
         var n = saved.length;
+        // 1か所でも正本が動いたら、戻った先（出品リスト・一覧・ネット出品の判定）を読み直させる
+        if (n > 0 || (priceResult && !priceResult.proposal)) markStale();
         m.className = n === changed ? "msg ok" : "msg err";
         if (n === 0) {
           m.textContent = "保存されませんでした。もう一度お試しください。";
@@ -3224,7 +3275,7 @@
         f += '<label class="f"><span>' + esc(nm) + "</span>";
         if (kind === "textarea") {
           f += '<textarea data-nf="' + esc(nm) + '" rows="3" style="width:100%;min-height:88px;' +
-               'padding:10px 12px;border:1px solid var(--line);border-radius:12px;font:inherit;' +
+               'padding:10px 12px;border:1px solid var(--line);border-radius:12px;' +
                'background:#fff;color:var(--fg);">' + esc(v) + "</textarea>";
         } else if (kind === "select") {
           f += '<select data-nf="' + esc(nm) + '" class="input" style="width:100%;min-height:52px;">' +
@@ -3535,9 +3586,34 @@
       pm.textContent = "前の品の写真をまだ送っています。送り終わってから開いてください。";
       return;
     }
+    // 🔴【2026-09-28】入らなかった写真が残ったまま別の品を開くと、下で BURST を作り直して
+    //   前の品の再送対象が**黙って消えていた**。送信中を断るのと同じ場所・同じ見た目で聞く
+    //   （管理モードの画面なので確認1段は可）。もう一度送る＝前の品の番号へ送る（own.mid）。
+    if (BURST && BURST.mid !== mid && burstCounts().failed) {
+      var prev = BURST, nf = burstCounts().failed;
+      pm.className = "msg err";
+      pm.innerHTML = esc("前の品（" + (prev.name || prev.mid) + "）の入らなかった写真が " + nf + " 枚あります。") +
+        '<button class="btn" id="net-burst-prev-retry" type="button" style="margin-top:8px;">' +
+        '<span class="t">もう一度送る</span></button>' +
+        '<button class="btn" id="net-burst-prev-drop" type="button" style="margin-top:8px;">' +
+        '<span class="t">捨てて進む</span></button>';
+      $("net-burst-prev-retry").addEventListener("click", function () {
+        if (BURST !== prev) return;
+        burstRetry();
+        pm.className = "msg";
+        pm.textContent = "前の品の写真をもう一度送っています。送り終わってから「続けて撮る」を押してください。";
+      });
+      $("net-burst-prev-drop").addEventListener("click", function () {
+        if (BURST === prev) BURST = null;
+        pm.className = "msg"; pm.textContent = "";
+        burstOpen(mid, onDone);   // 押した流れのまま開く（iPhone は操作の中からでないとカメラを開かない）
+      });
+      return;
+    }
     if (scanner) stopScan();   // QR読み取りがカメラを持っていたら先に手放す
     if (!BURST || BURST.mid !== mid) {
-      BURST = { mid: mid, stream: null, items: [], sending: false, seq: 0, onDone: onDone };
+      BURST = { mid: mid, stream: null, items: [], sending: false, seq: 0, onDone: onDone,
+                name: ($("net-name") && $("net-name").textContent) || mid };
     } else {
       BURST.onDone = onDone;
     }
@@ -3633,7 +3709,28 @@
   // 🔴 QRラベルを貼らず、カタログにも載せない。棚に入れない品の入口。
   //    値段はここで付けない（PC版でオーナーが付ける＝位が上）。
   //    出す先はヤフオクかメルカリのどちらか一つ（自社ECへは出さない）。
-  var ND = { id: "", photos: 0 };
+  // 🔴【2026-09-28 監査08】ND は**品ごとに新しいオブジェクトを作る**＝オブジェクトそのものが世代。
+  //   写真は FileReader の読み終わり（非同期）で送るので、送っている途中に品が変わると、
+  //   遅れて届いた分が**その時点の** ND.id（＝次の品の番号）で送られ、前の品の写真が
+  //   次の品の {番号}/net/ へ黙って入る恐れがあった（受け口は「まだ確定前か」しか見ない）。
+  //   quickreg の entryGen と同じ考え方＝呼ばれた時点の ND を閉じ込め、変わっていたら送らない。
+  //   uploading … この品の写真を送っている本数（送り終わるまで「出品リストへ送る」を押せない）
+  function ndFresh() { return { id: "", photos: 0, uploading: 0 }; }
+  var ND = ndFresh();
+
+  // 写真の送信中は「出品リストへ送る」を押せなくする（送り終わる前に確定すると、写真が欠ける）
+  function ndSyncSubmit() {
+    var b = $("nd-submit");
+    if (!b) return;
+    var t = b.querySelector(".t");
+    if (ND.uploading > 0) {
+      b.disabled = true;
+      if (t) t.textContent = "写真を送っています…（終わると押せます）";
+    } else if (!b.classList.contains("is-busy")) {
+      b.disabled = false;
+      if (t) t.textContent = "出品リストへ送る";
+    }
+  }
 
   function ndSay(el, cls, text) {
     var m = $(el); if (!m) return;
@@ -3642,7 +3739,8 @@
   }
 
   function ndReset() {
-    ND = { id: "", photos: 0 };
+    ND = ndFresh();   // 世代が変わる＝前の品の送りかけの写真はもう送らない
+    ndSyncSubmit();
     if (!$("nd-step1")) return;
     $("nd-step1").style.display = "none";
     $("nd-start").style.display = "";
@@ -3660,16 +3758,27 @@
   }
 
   // ① 先に番号だけ取る。写真は `{番号}/net/` へ入れるので、番号が先に要る。
+  // 🔴【2026-09-28 監査23】他の保存ボタンと同じく、通信中は薄く・押せなくする
+  //   （連打すると2本目が分かりにくい失敗の文言で返り、「押したのに」を誘っていた）。
   function ndStart() {
+    var sb = $("nd-start");
+    if (sb && sb.disabled) return;
+    if (sb) { sb.disabled = true; busyOn(sb); }
+    var own = ndFresh();
+    ND = own;   // 新しい品＝新しい世代
+    ndSyncSubmit();
     ndSay("nd-msg", "", "番号を用意しています…");
     call("netDirectAllocate", {}).then(function (r) {
-      ND.id = String((r && r.masterId) || "");
-      if (!ND.id) throw new Error("番号を取れませんでした");
+      if (ND !== own) return;   // 待つ間に画面を入り直した
+      own.id = String((r && r.masterId) || "");
+      if (!own.id) throw new Error("番号を取れませんでした");
       $("nd-start").style.display = "none";
       $("nd-step1").style.display = "";
-      ndSay("nd-msg", "ok", "番号 " + ND.id + " を用意しました。写真をとってください。");
+      ndSay("nd-msg", "ok", "番号 " + own.id + " を用意しました。写真をとってください。");
     }).catch(function (e) {
       ndSay("nd-msg", "err", (e && e.message) || "うまくいきませんでした");
+    }).finally(function () {
+      if (sb) { sb.disabled = false; busyOff(sb); }
     });
   }
 
@@ -3677,16 +3786,29 @@
   function ndPhotos(files) {
     if (!files || !files.length) return;
     if (!ND.id) { ndSay("nd-photo-msg", "err", "先に「はじめる」を押してください"); return; }
+    // 🔴 呼ばれた時点の品（世代）と番号を閉じ込める。以後 ND.id を読み直さない。
+    var own = ND, mid = ND.id;
+    // FileList は入力を空にすると中身が消える端末があるので、先に配列へ写す
+    files = Array.prototype.slice.call(files);
     var done = 0, failed = 0;
+    own.uploading += 1;
+    ndSyncSubmit();
     ndSay("nd-photo-msg", "", "送っています… 0/" + files.length);
     (function next(i) {
+      // 別の品へ移った（画面を入り直した）＝残りはこの品へも次の品へも送らない
+      if (ND !== own) {
+        own.uploading -= 1;
+        return;
+      }
       if (i >= files.length) {
-        ND.photos += done;
+        own.uploading -= 1;
+        ndSyncSubmit();
+        own.photos += done;
         ndSay("nd-photo-msg", failed ? "err" : "ok",
           failed ? (done + "枚を入れました（" + failed + "枚は入りませんでした）。")
                  : (done + "枚を入れました。"));
-        $("nd-photo-count").textContent = ND.photos
-          ? ("いまのところ " + ND.photos + "枚 入っています")
+        $("nd-photo-count").textContent = own.photos
+          ? ("いまのところ " + own.photos + "枚 入っています")
           : "まだ1枚も入っていません";
         // 🔴 両方とも空にする。同じ写真を選び直したとき change が出ないため
         $("nd-files").value = "";
@@ -3695,14 +3817,15 @@
       }
       var fr = new FileReader();
       fr.onload = function () {
+        if (ND !== own) { next(i); return; }   // 読んでいる間に品が変わった＝送らない
         call("netDirectPhoto", {
-          masterId: ND.id,
+          masterId: mid,
           fileName: "net-" + Date.now() + "-" + i + nameExt(files[i].name),
           dataBase64: String(fr.result || "")
         }).then(function () { done += 1; })
           .catch(function () { failed += 1; })
           .finally(function () {
-            ndSay("nd-photo-msg", "", "送っています… " + (done + failed) + "/" + files.length);
+            if (ND === own) ndSay("nd-photo-msg", "", "送っています… " + (done + failed) + "/" + files.length);
             next(i + 1);
           });
       };
@@ -3713,7 +3836,11 @@
 
   // ③ 確定。ここで正本の行と出品リストの行ができる（受け口が1つのまとまりで作る）
   function ndSubmit() {
+    var sb = $("nd-submit");
+    if (sb && sb.classList.contains("is-busy")) return;   // 送っている最中の二度押し
     if (!ND.id) { ndSay("nd-msg", "err", "先に「はじめる」を押してください"); return; }
+    // ボタンを押せなくするだけに頼らない（送り終わる前の確定は写真が欠ける）
+    if (ND.uploading > 0) { ndSay("nd-msg", "err", "写真を送っています。送り終わってから押してください"); return; }
     // 🔴 画面でも一度見るが、**断るのは受け口**（画面の作りに守りを預けない）
     if (!ND.photos) { ndSay("nd-msg", "err", "写真を少なくとも1枚は入れてください"); return; }
     var dim = String($("nd-dim").value || "").trim();
@@ -3728,16 +3855,19 @@
     var price = String(($("nd-price") && $("nd-price").value) || "").replace(/[,\s円]/g, "");
     if (price && !/^\d+$/.test(price)) { ndSay("nd-msg", "err", "値段は数字だけで入れてください（例: 5500）"); return; }
 
+    var own = ND;
+    if (sb) { sb.disabled = true; busyOn(sb); }
     ndSay("nd-msg", "", "送っています…");
     call("netDirectSubmit", {
-      masterId: ND.id, dimensions: dim, shipSize: ship, memo: memo, dest: dest,
+      masterId: own.id, dimensions: dim, shipSize: ship, memo: memo, dest: dest,
       name: name, price: price
     }).then(function (r) {
-      var id = String((r && r.masterId) || ND.id);
+      if (ND !== own) return;   // 待つ間に画面を入り直した（新しい品の画面を書き換えない）
+      var id = String((r && r.masterId) || own.id);
       // 🔴 どこまで進んだかは**受け口が言った状態**をそのまま出す（画面で言い切らない）
       ndSay("nd-msg", "ok", String((r && r.message) || (id + " を出品リストへ入れました。")));
       // 続けて次の品へ進めるように、番号を空にして最初の状態へ戻す
-      ND = { id: "", photos: 0 };
+      ND = ndFresh();
       $("nd-step1").style.display = "none";
       $("nd-start").style.display = "";
       $("nd-files").value = "";
@@ -3747,7 +3877,11 @@
       $("nd-photo-count").textContent = "まだ1枚も入っていません";
       ndSay("nd-photo-msg", "", "");
     }).catch(function (e) {
+      if (ND !== own) return;
       ndSay("nd-msg", "err", (e && e.message) || "うまくいきませんでした");
+    }).finally(function () {
+      if (sb) { busyOff(sb); sb.disabled = false; }
+      ndSyncSubmit();
     });
   }
 

@@ -662,7 +662,32 @@
   //       送信待ちが残っている間はタブを閉じるときに警告し、失敗は**消えない赤い帯**で出す。
   var pendingUpload = null;    // {gen, promise} 進行中の写真アップロード（登録側が待ち合わせる）
   var queued = 0;              // 送信待ちの登録件数（0になるまでタブを閉じさせない）
-  var failedJobs = [];         // {masterId, message} 失敗した登録（人が拾うまで消さない）
+  var failedJobs = [];         // {masterId, message, lost?} 失敗した登録（人が拾うまで消さない）
+  var queuedIds = [];          // 送信待ちの品のID（sessionStorage へ写す用。queued と同じ数だけある）
+  // 🔴【2026-09-28 監査09】送信待ち・失敗の記録を**sessionStorage にも控える**。
+  //   メモリだけだと、カメラを開いた間に端末がページを作り直したとき（下の detectCameraCrash_ の
+  //   コメント参照・Oppo実機で確認済み）、送信待ちの品が赤帯を一度も出さずに消える＝
+  //   現物が在庫に載らないまま誰も気づかない（T-00164と同じ壊れ方）。
+  //   ⚠️ 入れるのはIDと文言だけ（写真の中身は入れない）。localStorage へは入れない（先頭の方針）。
+  //   ⚠️ 速さ（押したらすぐ次のQRへ＝キュー方式）は変えない。書くのは積む・終わる・落ちるの3か所だけ。
+  var INFLIGHT_KEY = 'qreg_inflight';
+  function saveInflight_() {
+    try {
+      if (!queuedIds.length && !failedJobs.length) { sessionStorage.removeItem(INFLIGHT_KEY); return; }
+      sessionStorage.setItem(INFLIGHT_KEY, JSON.stringify({ pending: queuedIds, failed: failedJobs }));
+    } catch (e) { /* 控えられなくても登録そのものは進める */ }
+  }
+  function dropQueuedId_(id) {
+    var k = queuedIds.indexOf(id);
+    if (k !== -1) queuedIds.splice(k, 1);
+  }
+  // 登録済みと分かった品は赤帯から外す（同じラベルを読み直して「登録済み」と出た・登録し直して通った）
+  function clearFailed_(id) {
+    if (!id) return false;
+    var before = failedJobs.length;
+    failedJobs = failedJobs.filter(function (j) { return j.masterId !== id; });
+    return failedJobs.length !== before;
+  }
   // 🔴【2026-07-26追加・Codex指摘】入力シートの「世代」。openEntry / resetToStandby のたびに増える。
   //   遅れて返ったRPC応答が、既に別の品へ移った画面を触ってしまう事故を塞ぐための番号。
   //   実際に起きうる壊れ方（エラーが1つも出ない）:
@@ -1294,6 +1319,13 @@
         toast('先行発行リストに見つかりません。ラベルとIDを確認してください', 'err'); return;
       }
       if (res.status === 'registered') {
+        // 🔴【2026-09-28 監査09】赤帯に出ていた品なら、登録済みと分かったので帯から外す
+        if (clearFailed_(res.masterId)) {
+          saveInflight_();
+          renderQueue();
+          toast((res.masterId || '') + ' は登録できていました（帯から外しました）。次のQRをどうぞ', 'ok');
+          return;
+        }
         toast((res.masterId || '') + ' は登録済みです。次のQRをどうぞ', 'err'); return;
       }
       openEntry(res.masterId, res.token); // status === 'unused'
@@ -1524,6 +1556,8 @@
     var waitUpload = (pendingUpload && pendingUpload.gen === gen) ? pendingUpload.promise : null;
 
     queued++;
+    queuedIds.push(doneId);
+    saveInflight_();   // カメラを開く前に控える（この直後の autoNextScan で端末がページを捨てうる）
     lastLocation = location;
     try { localStorage.setItem(LAST_LOCATION_KEY, location); } catch (e) {}
     renderQueue();
@@ -1533,6 +1567,9 @@
 
     function finish_(shownId, okText) {
       queued = Math.max(0, queued - 1);
+      dropQueuedId_(doneId);
+      clearFailed_(doneId);   // 前に落ちた（前回中断した）同じ品を登録し直して通った
+      saveInflight_();
       sessionCount++;
       renderQueue();
       toast(shownId + ' ' + okText, 'ok');
@@ -1542,7 +1579,10 @@
     //    過去にT-00164で「写真だけDriveに残り、現物が在庫に載らない」事故が起きている。
     function fail_(msg) {
       queued = Math.max(0, queued - 1);
+      dropQueuedId_(doneId);
+      clearFailed_(doneId);   // 同じ品が二重に並ばないように（最新の失敗1件にする）
       failedJobs.push({ masterId: doneId, message: String(msg || '') });
+      saveInflight_();
       renderQueue();
       syncUi();
     }
@@ -1560,6 +1600,11 @@
       // トークン自体が死んだらページ全体の問題（送信待ちの他の品も通らない）
       if (isTokenDeadError(msg)) {
         queued = Math.max(0, queued - 1);
+        // 登録されていない＝控えは「失敗」として残す（入り直したあとの画面で赤帯に出る）
+        dropQueuedId_(doneId);
+        clearFailed_(doneId);
+        failedJobs.push({ masterId: doneId, message: String(msg || '') });
+        saveInflight_();
         renderQueue();
         showFatal('続行できません', tokenDeadHint_(msg), false);
         return;
@@ -1583,10 +1628,30 @@
       el.style.display = '';
       el.style.background = '#b53c32';
       el.style.color = '#fff';
-      el.innerHTML = '登録できなかった品が' + failedJobs.length + '件あります：'
-        + failedJobs.map(function (j) { return j.masterId; }).join('・')
-        + '<br><span style="font-weight:400; font-size:11.5px;">'
-        + '同じラベルをもう一度読み取って登録し直してください（写真は撮り直しになります）</span>';
+      var esc_ = function (t) {
+        return String(t).replace(/[&<>"']/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      };
+      var failed = failedJobs.filter(function (j) { return !j.lost; });
+      var lost = failedJobs.filter(function (j) { return j.lost; });
+      var h = '';
+      if (failed.length) {
+        h += '登録できなかった品が' + failed.length + '件あります：'
+          + esc_(failed.map(function (j) { return j.masterId; }).join('・'))
+          + '<br><span style="font-weight:400; font-size:11.5px;">'
+          + '同じラベルをもう一度読み取って登録し直してください（写真は撮り直しになります）</span>';
+      }
+      // 🔴【2026-09-28 監査09】前回ページが作り直されて、送信待ちのまま消えた品。
+      //   「登録できなかった」とは違う（受け口では通っているかもしれない）ので文言を分ける。
+      if (lost.length) {
+        h += (h ? '<br>' : '') + '前回、送信待ちのまま画面が閉じた品が' + lost.length + '件あります：'
+          + esc_(lost.map(function (j) { return j.masterId; }).join('・'))
+          + '<br><span style="font-weight:400; font-size:11.5px;">'
+          + '登録できたか分かりません。同じラベルをもう一度読み取ってください'
+          + '（「登録済み」と出れば入っています。出なければ、そのまま登録し直してください）</span>';
+      }
+      el.innerHTML = h;
       return;
     }
     if (queued > 0) {
@@ -1657,6 +1722,32 @@
     scanStatus('カメラから戻ったときに、この画面が端末によって作り直されました'
       + '（＝撮った写真が届いていません）。端末のメモリ不足です。'
       + '下の「ページ内カメラで撮る」に切り替えてお試しください。', 'err');
+  })();
+
+  // 🔴【2026-09-28 監査09】前回の送信待ち・失敗を起こし直す（上の detectCameraCrash_ と同じ時に見る）。
+  //   送信待ちのまま残っていた＝このページが作り直されて、送信の結果を誰も受け取っていない。
+  //   ⚠️ 時間では消さない（未登録の品は、時間が経っても在庫に載らないまま）。
+  //      消えるのは、同じラベルを読んで「登録済み」と分かったときか、登録し直して通ったとき。
+  (function restoreInflight_() {
+    var raw;
+    try { raw = sessionStorage.getItem(INFLIGHT_KEY); } catch (e) { return; }
+    if (!raw) return;
+    var st;
+    try { st = JSON.parse(raw); } catch (e) { st = null; }
+    if (!st) { try { sessionStorage.removeItem(INFLIGHT_KEY); } catch (e) {} return; }
+    var seen = {};
+    (st.failed || []).forEach(function (j) {
+      if (!j || !j.masterId || seen[j.masterId]) return;
+      seen[j.masterId] = 1;
+      failedJobs.push({ masterId: String(j.masterId), message: String(j.message || ''), lost: !!j.lost });
+    });
+    (st.pending || []).forEach(function (id) {
+      if (!id || seen[id]) return;
+      seen[id] = 1;
+      failedJobs.push({ masterId: String(id), message: '送信待ちのまま画面が作り直されました', lost: true });
+    });
+    saveInflight_();   // 送信待ちは「消えた」へ移したので、控えもその形で書き直す
+    if (failedJobs.length) renderQueue();
   })();
 
   // ページが生き残っていても、カメラアプリ側が途中で終了して**何も返さずに戻る**ことがある。
