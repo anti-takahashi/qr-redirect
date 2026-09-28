@@ -3187,8 +3187,15 @@
           if (NET_CUR !== masterId) return;   // もう別の品を見ている（その品の画面を上書きしない）
           busyOff(btn);
           btn.querySelector(".t").textContent = "送りました ✓";
-          netBanner("ok",
-            (res && res.alreadyQueued) ? "もう出品リストに入っています" : "出品リストに送りました",
+          // 🔴【2026-09-28】候補で入っていた品は受け口が「今日送った」印を付ける（markedSent）
+          var sentTitle = "出品リストに送りました";
+          if (res && res.markedSent) {
+            sentTitle = "出品リストに入っていました。今日送った品として印を付けました";
+          } else if (res && res.alreadyQueued) {
+            sentTitle = res.status ? "もう出品リストに入っています（いま: " + res.status + "）"
+                                   : "もう出品リストに入っています";
+          }
+          netBanner("ok", sentTitle,
             name + "（" + masterId + "）\n出す／出さないはPC版で決めます。", true);
           netBannerReveal();
         }).catch(function (e) {
