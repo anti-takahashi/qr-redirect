@@ -267,6 +267,8 @@
   .net-banner .sub2 { color: var(--fg); font-size: 15px; font-weight: 400; }
   .net-banner .btn { margin: 12px 0 0; }
   .net-banner .btn .t { text-align: center; }
+  /* 送り終えたボタン（送りました ✓）は押せないことが見て分かるように薄くする */
+  #net-add[disabled]:not(.is-busy) { opacity: .6; }
 
   /* 通信中は「止まっている」と見えないようにする */
   #busy {
@@ -3137,7 +3139,7 @@
           netBanner("ok",
             (res && res.alreadyQueued) ? "もう出品リストに入っています" : "出品リストに送りました",
             name + "（" + masterId + "）\n出す／出さないはPC版で決めます。", true);
-          window.scrollTo(0, 0);
+          netBannerReveal();
         }).catch(function (e) {
           if (NET_CUR !== masterId) return;
           busyOff(btn);
@@ -3146,7 +3148,7 @@
             warnings.length ? "このまま出品リストへ送る" : "出品リストへ送る";
           netBanner("err", "送れませんでした", ((e && e.message) || "理由が分かりません") +
             "\nもう一度下のボタンを押してください。", false);
-          window.scrollTo(0, 0);
+          netBannerReveal();
         });
       });
     }
@@ -3399,6 +3401,14 @@
       // 押したその流れのままカメラを開く（iPhone は操作の中からでないとカメラを開かない）
       $("net-scan").click();
     });
+  }
+
+  // 帯が画面に入るところまで動かす（上には QR を読む欄があり、先頭へ戻すだけでは
+  // iPhone で帯が画面の外に残りうる）
+  function netBannerReveal() {
+    var b = $("net-banner");
+    if (b && b.scrollIntoView) b.scrollIntoView({ block: "start", behavior: "smooth" });
+    else window.scrollTo(0, 0);
   }
 
   // ---- 続けて撮る（2026-09-28・オーナー実機 iPhone）------------------------------
