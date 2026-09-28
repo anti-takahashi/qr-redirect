@@ -238,6 +238,36 @@
   .msg.err { color: var(--danger); font-weight: 700; }
   .msg.ok { color: var(--ok); font-weight: 700; }
 
+  /* 【2026-09-28・オーナー実機(iPhone)「撮影ごとに撮影押さないといけないの不便。連続撮影欲しい」】
+     続けて撮る面。カメラを開いたまま、シャッターを押すたびに1枚ずつ裏で送る。
+     QR読み取り(#scan-overlay)とは別の面＝カメラの持ち主を分ける（止める経路が混ざらない）。 */
+  #cam-overlay {
+    display: none; position: fixed; inset: 0; z-index: 61;
+    background: #1c1813; color: #fff;
+    padding: calc(12px + env(safe-area-inset-top)) 14px calc(12px + env(safe-area-inset-bottom));
+    flex-direction: column; align-items: center; gap: 10px;
+  }
+  #cam-overlay.on { display: flex; }
+  #cam-video { width: 100%; max-width: 480px; flex: 1; min-height: 0; object-fit: contain;
+               background: #000; border-radius: 14px; transition: opacity 80ms; }
+  #cam-video.flash { opacity: .25; }
+  #cam-count { font-size: 16px; text-align: center; min-height: 1.5em; }
+  #cam-overlay .msg { color: #ffd9d0; text-align: center; font-size: 15px; margin-top: 0; }
+  #cam-overlay .btn { max-width: 480px; margin-bottom: 0; background: var(--card-raised);
+                      color: var(--fg); border-color: #fff; }
+  #cam-overlay .btn .t { text-align: center; }
+  #cam-shutter { min-height: 76px; font-size: 20px; }
+  #cam-shutter[disabled] { opacity: .5; }
+  /* 【2026-09-28・オーナー実機「送るボタン押してもページ移動などないから送れたかわからない」】
+     送った結果は**カードの一番上**に大きく出す（下の小さな一行は、長いカードの底で見えなかった）。 */
+  .net-banner { border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; font-size: 16px; }
+  .net-banner .big { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  .net-banner.ok { background: #e3efe6; color: var(--ok); border: 2px solid var(--ok); }
+  .net-banner.err { background: #f6e3e8; color: var(--danger); border: 2px solid var(--danger); }
+  .net-banner .sub2 { color: var(--fg); font-size: 15px; font-weight: 400; }
+  .net-banner .btn { margin: 12px 0 0; }
+  .net-banner .btn .t { text-align: center; }
+
   /* 通信中は「止まっている」と見えないようにする */
   #busy {
     position: fixed; left: 0; right: 0; top: 0; height: 3px;
@@ -741,6 +771,18 @@
   <button class="btn" id="scan-cancel" type="button"><span class="t" style="text-align:center;">やめる</span></button>
 </div>
 
+<!-- 続けて撮る（QRからネット出品の出品用写真・2026-09-28）。
+     🔴 カメラは開いている間だけ動かす。終わる・別の画面へ行く・裏へ回す、どれでも止める。
+     ⚠️ playsinline と muted が無いと、iPhone の Safari は全画面の再生器に切り替わって撮れない。 -->
+<div id="cam-overlay" aria-hidden="true">
+  <video id="cam-video" autoplay muted playsinline></video>
+  <div id="cam-count">カメラを用意しています…</div>
+  <div id="cam-msg" class="msg"></div>
+  <button class="btn" id="cam-shutter" type="button" disabled><span class="t">撮る</span></button>
+  <button class="btn" id="cam-retry" type="button" style="display:none;"><span class="t">入らなかった写真をもう一度送る</span></button>
+  <button class="btn" id="cam-close" type="button"><span class="t">終わる</span></button>
+</div>
+
 <script>
 (function () {
   "use strict";
@@ -811,6 +853,8 @@
     //   繰り返し失敗すると offline が何枚も積まれ、「←」を押しても
     //   別の offline に戻るだけになる（出口の無い階段）。
     if (name === "offline" || name === "nokey" || name === "pin") stack = [];
+    // 続けて撮るのカメラは画面を移ったら必ず止める（認証切れで入口へ飛ばされた時も）
+    if (BURST && BURST.stream) burstClose();
     var all = document.querySelectorAll(".view");
     for (var i = 0; i < all.length; i++) all[i].classList.remove("on");
     v.classList.add("on");
@@ -2994,7 +3038,10 @@
     //   ここは**現物を手に持って、ネットに出すかを決める画面**。
     //   IDだけでは「いま持っているものがこれか」も「出す価値があるか」も判断できない。
     //   写真・商品名・説明を出す（写真は後追いで入れて、判定を待たせない）。
+    NET_CUR = masterId;
     var h = '<div class="card">' +
+            // 送った結果はここ（カードの一番上）に出す。下の #net-r は長いカードの底で見えなかった
+            '<div id="net-banner" aria-live="polite"></div>' +
             '<img id="net-th" alt="" style="display:none; width:100%; max-height:240px;' +
             'object-fit:contain; border-radius:12px; background:#e8dec7; margin-bottom:12px;">' +
             '<h2 id="net-name">' + esc(masterId) + "</h2>" +
@@ -3042,6 +3089,11 @@
          'style="position:absolute;width:1px;height:1px;opacity:0;">' +
          '<button class="btn" id="net-photo" type="button">' +
          '<span class="t">写真を撮る・選ぶ</span></button>' +
+         // 🔴【2026-09-28・オーナー実機(iPhone)】1枚ごとに「撮る」を押し直すのが不便。
+         //   カメラを開いたまま続けて撮れる口を足す。上の「写真を撮る・選ぶ」は残す
+         //   （写真アプリから何枚もまとめて選ぶ用途・カメラが開けない端末の逃げ道）。
+         '<button class="btn" id="net-burst" type="button" style="margin-top:8px;">' +
+         '<span class="t">続けて撮る</span></button>' +
          '<button class="btn" id="net-shot" type="button" style="margin-top:8px;">' +
          '<span class="t">ぐるっと撮る（ターンテーブル）</span></button>' +
          '<div class="msg" id="net-photo-msg"></div></div>' +
@@ -3056,23 +3108,45 @@
 
     var ok = !blocked;
     if (ok) {
+      // 🔴【2026-09-28・オーナー実機(iPhone)「送るボタン押してもページ移動などないから送れたかわからない」】
+      //   結果は #net-r（写真と入力欄の下＝画面の外）にしか出ていなかった。
+      //   成功も失敗も**カードの一番上に大きく**出し、画面を上へ戻して必ず目に入れる。
+      //   成功したらボタンは「送りました ✓」のまま押せなくする（押せると二度送ったか迷う）。
+      //   ⚠️ 前の画面へ自動では戻さない。ここへ来る元はホームのタイルなので、
+      //      戻すと品ごとにタイルを押し直すことになる。店では「読む→確かめる→送る」を
+      //      品の数だけ繰り返すので、「続けて次の品へ」でそのままQRを読む形にする。
+      //   「直して、判定をやり直す」のあとも同じボタン・同じ表示を通る（netGo→netRender）。
       $("net-add").addEventListener("click", function () {
+        var btn = $("net-add");
         var r = $("net-r");
-        $("net-add").disabled = true;
-        r.className = "msg"; r.textContent = "送っています…";
+        var name = ($("net-name") && $("net-name").textContent) || masterId;
+        btn.disabled = true;
+        busyOn(btn);
+        btn.querySelector(".t").textContent = "送っています…";
+        netBanner("", "", "");
+        r.className = "msg"; r.textContent = "";
         // 🔴 未入力があるときサーバは {ok:false, needsAcknowledge:true} を返す。
         //   了承したうえで送る形にしないと、画面に理由も出ないまま失敗し続ける。
         call("addToNetListingQueue", {
           masterId: masterId,
           acknowledgeWarnings: warnings.length > 0
         }).then(function (res) {
-          r.className = "msg ok";
-          r.textContent = (res && res.alreadyQueued)
-            ? "この品はもう出品リストに入っています。"
-            : "出品リストへ送りました。出す／出さないはPC版で決めます。";
+          if (NET_CUR !== masterId) return;   // もう別の品を見ている（その品の画面を上書きしない）
+          busyOff(btn);
+          btn.querySelector(".t").textContent = "送りました ✓";
+          netBanner("ok",
+            (res && res.alreadyQueued) ? "もう出品リストに入っています" : "出品リストに送りました",
+            name + "（" + masterId + "）\n出す／出さないはPC版で決めます。", true);
+          window.scrollTo(0, 0);
         }).catch(function (e) {
-          $("net-add").disabled = false;
-          r.className = "msg err"; r.textContent = e.message;
+          if (NET_CUR !== masterId) return;
+          busyOff(btn);
+          btn.disabled = false;
+          btn.querySelector(".t").textContent =
+            warnings.length ? "このまま出品リストへ送る" : "出品リストへ送る";
+          netBanner("err", "送れませんでした", ((e && e.message) || "理由が分かりません") +
+            "\nもう一度下のボタンを押してください。", false);
+          window.scrollTo(0, 0);
         });
       });
     }
@@ -3263,6 +3337,7 @@
 
     // ---- 出品用の写真を足す ----
     $("net-photo").addEventListener("click", function () { $("net-file").click(); });
+    $("net-burst").addEventListener("click", function () { burstOpen(masterId, netLoadPhotos); });
     $("net-file").addEventListener("change", function () {
       var files = Array.prototype.slice.call(this.files || []);
       this.value = "";
@@ -3300,6 +3375,243 @@
       })(0);
     });
   }
+
+  // いま「QRからネット出品」で開いている品（遅れて届いた結果で別の品の画面を書き換えない）
+  var NET_CUR = "";
+
+  // 送った結果の帯（カードの一番上）。kind: "ok" / "err" / ""（消す）
+  function netBanner(kind, title, body, withNext) {
+    var b = $("net-banner");
+    if (!b) return;
+    if (!kind) { b.className = ""; b.innerHTML = ""; return; }
+    b.className = "net-banner " + kind;
+    b.innerHTML = '<div class="big">' + esc(title) + "</div>" +
+      '<div class="sub2" style="white-space:pre-wrap;">' + esc(body) + "</div>" +
+      (withNext ? '<button class="btn primary" id="net-next" type="button">' +
+                  '<span class="t">続けて次の品へ（QRを読む）</span></button>' : "");
+    var nx = $("net-next");
+    if (nx) nx.addEventListener("click", function () {
+      $("net-input").value = "";
+      $("net-msg").className = "msg"; $("net-msg").textContent = "";
+      $("net-detail").innerHTML = "";
+      NET_CUR = "";
+      window.scrollTo(0, 0);
+      // 押したその流れのままカメラを開く（iPhone は操作の中からでないとカメラを開かない）
+      $("net-scan").click();
+    });
+  }
+
+  // ---- 続けて撮る（2026-09-28・オーナー実機 iPhone）------------------------------
+  // カメラを開いたまま、シャッターのたびに1枚撮って裏で順に送る（送り終わりを待たずに次が撮れる）。
+  // 🔴 送るのは「写真を撮る・選ぶ」と同じ口（uploadNetImage・{ID}/net/）。
+  //    大きさは今の送信と同じく縮めない（受け口の上限 20MB に対して 1920px級の JPEG は十分小さい）。
+  //    向きは動画のコマをそのまま描くので、端末の向きどおりに立っている（EXIF の回転は付かない）。
+  // 🔴 送れなかった写真は黙って捨てない。手元に残し、数を出し、もう一度送れるようにする。
+  // ⚠️ QR読み取り(scanner)とはカメラを分けて持つ。止める経路が混ざると、ランプが点いたままになる。
+  var BURST = null;   // { mid, stream, items:[{name,data,state}], sending, seq, onDone }
+
+  function burstCounts() {
+    var c = { shot: 0, sending: 0, done: 0, failed: 0 };
+    if (!BURST) return c;
+    BURST.items.forEach(function (it) {
+      c.shot += 1;
+      if (it.state === "done") c.done += 1;
+      else if (it.state === "failed") c.failed += 1;
+      else c.sending += 1;
+    });
+    return c;
+  }
+
+  function burstShowCount() {
+    var c = burstCounts();
+    var t = "撮った " + c.shot + "枚　送信中 " + c.sending + "　送信済み " + c.done;
+    if (c.failed) t += "　入らなかった " + c.failed;
+    if ($("cam-count")) $("cam-count").textContent = t;
+    var rb = $("cam-retry");
+    if (rb) {
+      rb.style.display = c.failed ? "" : "none";
+      rb.querySelector(".t").textContent = "入らなかった " + c.failed + "枚をもう一度送る";
+    }
+    // 閉じたあとも、送り終わるまで・失敗が残る間は元の画面に出す
+    if (BURST && !BURST.stream && NET_CUR === BURST.mid) burstReport();
+  }
+
+  // 閉じたあと、元の画面（出品用の写真の下）に結果を出す
+  function burstReport() {
+    var m = $("net-photo-msg");
+    if (!m || !BURST) return;
+    var c = burstCounts();
+    if (c.sending) {
+      m.className = "msg"; m.textContent = "続けて撮った写真を送っています… " + c.done + "/" + c.shot;
+      return;
+    }
+    if (c.failed) {
+      m.className = "msg err";
+      m.innerHTML = esc(c.done + "枚を入れました（" + c.failed + "枚は入りませんでした）。") +
+        '<button class="btn" id="net-burst-retry" type="button" style="margin-top:8px;">' +
+        '<span class="t">入らなかった ' + c.failed + "枚をもう一度送る</span></button>";
+      $("net-burst-retry").addEventListener("click", burstRetry);
+      return;
+    }
+    m.className = "msg ok"; m.textContent = c.done + "枚を入れました。";
+  }
+
+  function burstPump() {
+    if (!BURST || BURST.sending) return;
+    var it = null;
+    for (var i = 0; i < BURST.items.length; i++) {
+      if (BURST.items[i].state === "wait") { it = BURST.items[i]; break; }
+    }
+    if (!it) {
+      // 全部送り終えた。閉じてあれば一覧を読み直す
+      if (!BURST.stream) {
+        var b = BURST, c = burstCounts();
+        if (c.done && b.onDone && NET_CUR === b.mid) b.onDone();
+        if (!c.failed) BURST = null;   // 失敗が残る間は、もう一度送れるよう手元に置く
+      }
+      return;
+    }
+    var own = BURST;
+    own.sending = true;
+    it.state = "sending";
+    burstShowCount();
+    call("uploadNetImage", { masterId: own.mid, fileName: it.name, dataBase64: it.data })
+      .then(function () { it.state = "done"; it.data = ""; })   // 送れた分はメモリから外す
+      .catch(function () { it.state = "failed"; })
+      .finally(function () {
+        own.sending = false;
+        if (BURST !== own) return;
+        burstShowCount();
+        burstPump();
+      });
+  }
+
+  function burstRetry() {
+    if (!BURST) return;
+    BURST.items.forEach(function (it) { if (it.state === "failed") it.state = "wait"; });
+    burstShowCount();
+    burstPump();
+  }
+
+  function burstStopCamera() {
+    if (!BURST || !BURST.stream) return;
+    try { BURST.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) { /* もう止まっている */ }
+    BURST.stream = null;
+    var v = $("cam-video");
+    if (v) { try { v.pause(); } catch (e) { /* 止まっている */ } v.srcObject = null; }
+  }
+
+  // 閉じる（終わる・別の画面・裏へ回した、のどれでもここ）。送信は裏で続ける。
+  function burstClose() {
+    var ov = $("cam-overlay");
+    if (ov) { ov.className = ""; ov.setAttribute("aria-hidden", "true"); }
+    if (!BURST) return;
+    burstStopCamera();
+    if (!BURST.items.length) { BURST = null; return; }
+    if (NET_CUR === BURST.mid) burstReport();
+    burstPump();   // 残りがあれば続ける／無ければ一覧を読み直す
+  }
+
+  function burstOpen(mid, onDone) {
+    var pm = $("net-photo-msg");
+    var md = navigator.mediaDevices;
+    if (!md || typeof md.getUserMedia !== "function") {
+      pm.className = "msg err";
+      pm.textContent = "この端末ではページの中でカメラを開けません。「写真を撮る・選ぶ」をお使いください。";
+      return;
+    }
+    if (BURST && BURST.mid !== mid && burstCounts().sending) {
+      pm.className = "msg err";
+      pm.textContent = "前の品の写真をまだ送っています。送り終わってから開いてください。";
+      return;
+    }
+    if (scanner) stopScan();   // QR読み取りがカメラを持っていたら先に手放す
+    if (!BURST || BURST.mid !== mid) {
+      BURST = { mid: mid, stream: null, items: [], sending: false, seq: 0, onDone: onDone };
+    } else {
+      BURST.onDone = onDone;
+    }
+    var own = BURST;
+    var ov = $("cam-overlay"), v = $("cam-video"), sh = $("cam-shutter");
+    ov.className = "on"; ov.setAttribute("aria-hidden", "false");
+    sh.disabled = true;
+    $("cam-msg").textContent = "";
+    $("cam-count").textContent = "カメラを用意しています…";
+    burstShowCount();
+    if (!own.items.length) $("cam-count").textContent = "カメラを用意しています…";
+    md.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1440 } }
+    }).then(function (stream) {
+      // 開くのを待つ間に閉じた・別の品へ移った → すぐ手放す
+      if (BURST !== own || $("cam-overlay").className !== "on") {
+        stream.getTracks().forEach(function (t) { t.stop(); });
+        return;
+      }
+      own.stream = stream;
+      stream.getTracks().forEach(function (t) {
+        t.addEventListener("ended", function () { if (BURST === own && own.stream) burstClose(); });
+      });
+      v.srcObject = stream;
+      // ⚠️ 大きさが分かる前に撮ると、iPhone では真っ黒の1枚になる。分かってから押せるようにする
+      var ready = function () {
+        if (v.videoWidth > 0 && own.stream) { sh.disabled = false; burstShowCount(); }
+      };
+      v.onloadedmetadata = ready;
+      v.onplaying = ready;
+      var p = v.play();
+      if (p && p.then) p.then(ready).catch(function () { /* 自動再生の拒否は loadedmetadata 側で拾う */ });
+    }).catch(function (e) {
+      if (BURST !== own) return;
+      var name = (e && e.name) || "";
+      var msg;
+      if (name === "NotAllowedError" || name === "SecurityError") {
+        msg = "カメラの使用が許可されていません。";
+      } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+        msg = "この端末で使えるカメラが見つかりませんでした。";
+      } else if (name === "NotReadableError") {
+        msg = "カメラを他のアプリが使用中のようです。";
+      } else {
+        msg = "カメラを開けませんでした（" + ((e && e.message) || name || "理由不明") + "）。";
+      }
+      burstClose();
+      pm.className = "msg err";
+      pm.textContent = msg + "「写真を撮る・選ぶ」でも写真を入れられます。";
+    });
+  }
+
+  (function () {
+    var sh = $("cam-shutter");
+    if (!sh) return;
+    sh.addEventListener("click", function () {
+      if (!BURST || !BURST.stream) return;
+      var v = $("cam-video");
+      var w = v.videoWidth, h = v.videoHeight;
+      if (!w || !h) return;
+      var cv = document.createElement("canvas");
+      cv.width = w; cv.height = h;
+      cv.getContext("2d").drawImage(v, 0, 0, w, h);
+      var data = cv.toDataURL("image/jpeg", 0.9);
+      cv.width = 0; cv.height = 0;   // 大きな canvas を手放す（iPhone はメモリが厳しい）
+      BURST.seq += 1;
+      BURST.items.push({
+        // ⚠️ 名前が重なると受け口が断る。連打でも重ならないよう通し番号を付ける
+        name: "net-" + Date.now() + "-b" + BURST.seq + ".jpg",
+        data: data, state: "wait"
+      });
+      // 撮れたことを目で分かるように一瞬暗くする
+      v.classList.add("flash");
+      setTimeout(function () { v.classList.remove("flash"); }, 120);
+      burstShowCount();
+      burstPump();
+    });
+    $("cam-close").addEventListener("click", burstClose);
+    $("cam-retry").addEventListener("click", burstRetry);
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden && BURST && BURST.stream) burstClose();
+    });
+    window.addEventListener("pagehide", function () { if (BURST && BURST.stream) burstClose(); });
+  })();
 
   // 拡張子だけ取り出す（受け口は jpg/jpeg/png しか受けない）
   function nameExt(n) {
