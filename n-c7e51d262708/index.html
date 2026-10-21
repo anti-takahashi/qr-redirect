@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ネット出品中の品｜アンティーク家具たかはし</title>
+<!--
+  裏カタログ（ヤフオク・メルカリに出ている品）。仕様と2段目（SNS）向けの決めごとは docs/net-catalog.md。
+  🔴 表のカタログからリンクしない・検索に出さない（noindex）。robots.txt には書かない（書くとパスを広告する）。
+  🔴 データは同じフォルダの data.json だけ（tools/net_catalog_export.py が書く・値段は出さない）。
+  見た目は members/index.html の値をそのまま写す（向こうを変えたらこちらも変える）。
+  manifest は付けない（members と同じ理由）。
+-->
+<meta name="robots" content="noindex, nofollow, noarchive">
+<link rel="preload" as="fetch" href="data.json" crossorigin>
+<link rel="apple-touch-icon" href="../icon-catalog-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="../icon-catalog-192.png">
+<meta name="theme-color" content="#f7f1e7">
+<style>
+  :root {
+    --bg: #f7f1e7; --fg: #2b2926; --accent: #83937d;
+    --muted: #665e54; --line: #e8dec7; --card: #fefbf5; --card-raised: #ffffff;
+    --ok: #2f7a4d; --danger: #812b45; --attn: #b45b4b;
+    --shadow-card: 0 12px 24px -7px rgba(43, 41, 38, 0.16);
+    --shadow-subtle: 0 1px 2px rgba(43, 41, 38, 0.08);
+    --motion-press: 80ms; --motion-base: 160ms;
+    --ease-ui: cubic-bezier(.2, .8, .2, 1);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
+  body {
+    font: 15px/1.8 "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
+    padding: calc(24px + env(safe-area-inset-top)) 20px 16px 20px;
+    text-align: center;
+  }
+  header h1 {
+    font-size: 20px; letter-spacing: 0.12em; margin: 0 0 6px; font-weight: 600;
+    font-family: "Hiragino Mincho ProN", "Yu Mincho", YuMincho, "Shippori Mincho", serif;
+  }
+  header .shop-sub { font-size: 12px; color: var(--muted); margin: 0; letter-spacing: 0.05em; }
+  main { padding: 14px; max-width: 760px; margin: 0 auto; }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 18px; padding: 16px; margin-bottom: 12px;
+    box-shadow: var(--shadow-subtle);
+  }
+  h2 { font-size: 18px; margin: 18px 0 10px; }
+  p { margin: 0 0 10px; }
+  .sub { font-size: 13px; color: var(--muted); }
+  .msg { font-size: 15px; margin-top: 10px; min-height: 1.6em; }
+  .msg.err { color: var(--danger); font-weight: 700; }
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    width: 100%; min-height: 56px; padding: 12px 16px; margin-bottom: 10px;
+    background: var(--card-raised); border: 1px solid var(--line); border-radius: 16px;
+    font: inherit; font-weight: 700; color: var(--fg); cursor: pointer;
+    text-decoration: none;
+    transition: transform var(--motion-press) var(--ease-ui),
+                box-shadow var(--motion-base) var(--ease-ui);
+    touch-action: manipulation;
+  }
+  .btn:active, .item:active { transform: translateY(1px) scale(.985); transition-duration: 60ms; }
+  .btn:focus-visible, .item:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .item {
+    display: block; color: inherit; text-decoration: none;
+    background: var(--card-raised); border: 1px solid var(--line); border-radius: 16px;
+    overflow: hidden; cursor: pointer; position: relative;
+    box-shadow: var(--shadow-card);
+    transition: transform var(--motion-press) var(--ease-ui);
+  }
+  .item img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block; background: var(--line); }
+  .item .b { padding: 9px 10px 11px; }
+  .item .n { font-size: 13px; line-height: 1.55; max-height: 4.7em; overflow: hidden; }
+  .item .p { font-size: 15px; font-weight: 700; margin-top: 5px; }
+  .filters { display: flex; gap: 8px; margin-bottom: 12px; }
+  .input, select.input {
+    width: 100%; min-height: 48px; padding: 9px 12px;
+    border: 1px solid var(--line); border-radius: 14px;
+    font: inherit; font-size: 16px;
+    background: var(--card-raised); color: var(--fg);
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>アンティーク家具たかはし</h1>
+  <div class="shop-sub">ヤフオク・メルカリにて出品中の品</div>
+</header>
+<main>
+  <div class="card">
+    <p style="font-weight:700;">店頭にて実物確認できます（一部倉庫にあるもの有）</p>
+    <p class="sub">お買い求めは各サイトから。品の写真を押すと出品ページが開きます。</p>
+    <a class="btn" id="seller-yahoo" href="#" target="_blank" rel="noopener">ヤフオクの出品一覧</a>
+    <a class="btn" id="seller-mercari" href="#" target="_blank" rel="noopener" style="margin-bottom:0;">メルカリの出品一覧</a>
+  </div>
+  <div class="filters">
+    <select class="input" id="ch" style="width:40%;">
+      <option value="">すべて</option><option>ヤフオク</option><option>メルカリ</option>
+    </select>
+    <input class="input" id="q" type="search" placeholder="さがす（品名）" style="flex:1;">
+  </div>
+  <div class="msg" id="msg">読み込んでいます…</div>
+  <section id="sec-new" hidden>
+    <h2>新着</h2>
+    <div class="grid" id="grid-new"></div>
+  </section>
+  <section id="sec-all" hidden>
+    <h2>出品中の品</h2>
+    <div class="grid" id="grid-all"></div>
+  </section>
+</main>
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var DATA = null;
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  // 出品先のURLだけを開く（data.json が壊れても他所へ飛ばさない）
+  function safeUrl(u) {
+    return /^https:\/\/(auctions\.yahoo\.co\.jp\/jp\/auction\/|jp\.mercari\.com\/shops\/)/.test(u || "") ? u : "#";
+  }
+  function card(it) {
+    return '<a class="item" href="' + esc(safeUrl(it.url)) + '" target="_blank" rel="noopener">' +
+      '<img loading="lazy" decoding="async" alt="" src="' + esc(it.image) + '">' +
+      '<div class="b"><div class="n">' + esc(it.title) + "</div>" +
+      '<div class="p">' + esc(it.channel) + "にて出品中</div></div></a>";
+  }
+  function render() {
+    var ch = $("ch").value, q = $("q").value.trim();
+    var list = DATA.items.filter(function (it) {
+      return (!ch || it.channel === ch) && (!q || it.title.indexOf(q) >= 0);
+    });
+    var nw = list.filter(function (it) { return it.isNew; });
+    var old = list.filter(function (it) { return !it.isNew; });
+    $("grid-new").innerHTML = nw.map(card).join("");
+    $("grid-all").innerHTML = old.map(card).join("");
+    $("sec-new").hidden = nw.length === 0;
+    $("sec-all").hidden = old.length === 0;
+    $("msg").textContent = list.length ? list.length + "点" : "該当する品はありません。";
+  }
+  fetch("data.json", { cache: "no-cache" }).then(function (r) {
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return r.json();
+  }).then(function (d) {
+    DATA = d;
+    $("seller-yahoo").href = safeSeller(d.sellerUrls && d.sellerUrls["ヤフオク"]);
+    $("seller-mercari").href = safeSeller(d.sellerUrls && d.sellerUrls["メルカリ"]);
+    render();
+    $("ch").addEventListener("change", render);
+    $("q").addEventListener("input", render);
+  }).catch(function () {
+    $("msg").className = "msg err";
+    $("msg").textContent = "一覧を読み込めませんでした。時間をおいて開き直してください。";
+  });
+  function safeSeller(u) {
+    return /^https:\/\/(auctions\.yahoo\.co\.jp\/seller\/|jp\.mercari\.com\/shops\/profile\/)/.test(u || "") ? u : "#";
+  }
+})();
+</script>
+</body>
+</html>
