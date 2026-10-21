@@ -261,10 +261,25 @@
   #cam-thumbs { display: flex; gap: 6px; width: 100%; max-width: 480px; overflow-x: auto;
                 -webkit-overflow-scrolling: touch; flex: none; }
   #cam-thumbs:empty { display: none; }
-  #cam-thumbs img { height: 56px; width: auto; border-radius: 8px; flex: none;
-                    border: 2px solid transparent; }
-  #cam-thumbs img.wait, #cam-thumbs img.sending { opacity: .55; }
-  #cam-thumbs img.failed { border-color: var(--danger); }
+  /* ×の当たり判定（枠の上に8pxはみ出す）が横スクロールの枠で切られないよう、上と右に余白 */
+  #cam-thumbs { padding: 8px 8px 0 0; }
+  /* 【2026-10-21・オーナー「撮った写真のうち間違えたもの消したい。×押したら消せる等」】
+     小さな絵は枠（.ph-th）に入れ、右上に×（当たり判定 48px）。送信中・消している最中は×を出さない。 */
+  .ph-th { position: relative; flex: none; padding: 6px 6px 0 0; }
+  .ph-th img { display: block; height: 72px; width: auto; border-radius: 8px;
+               border: 2px solid transparent; }
+  .ph-th.wait img, .ph-th.sending img, .ph-th.deleting img { opacity: .55; }
+  .ph-th.failed img { border-color: var(--danger); }
+  .ph-x { position: absolute; top: -8px; right: -8px; width: 48px; height: 48px; padding: 0;
+          border: 0; background: none; cursor: pointer; display: flex; z-index: 1;
+          align-items: flex-start; justify-content: flex-end; }
+  .ph-x span { display: block; width: 28px; height: 28px; margin: 6px 6px 0 0; border-radius: 50%;
+               background: #2f2b26; color: #fff; border: 2px solid #fff;
+               font-size: 18px; line-height: 24px; text-align: center; font-weight: 700; }
+  .ph-th.sending .ph-x, .ph-th.deleting .ph-x { display: none; }
+  /* ネットだけに出すの「いまのところ N枚」の下の並び（ライブラリから入れた分も） */
+  #nd-photo-grid { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 12px; }
+  #nd-photo-grid:empty { display: none; }
   #cam-shutter[disabled] { opacity: .5; }
   /* 【2026-09-28・オーナー実機「送るボタン押してもページ移動などないから送れたかわからない」】
      送った結果は**カードの一番上**に大きく出す（下の小さな一行は、長いカードの底で見えなかった）。 */
@@ -495,6 +510,8 @@
                style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;">
         <div class="msg" id="nd-photo-msg"></div>
         <div id="nd-photo-count" class="d" style="margin:6px 0 12px;">まだ1枚も入っていません</div>
+        <!-- 入った写真の並び。×で消せる（「出品リストへ送る」を押す前だけ・2026-10-21） -->
+        <div id="nd-photo-grid"></div>
 
         <!-- ② 大きさ -->
         <label class="f">
@@ -3419,6 +3436,11 @@
         isHere: function () { return NET_CUR === masterId; },
         upload: function (fileName, data) {
           return call("uploadNetImage", { masterId: masterId, fileName: fileName, dataBase64: data });
+        },
+        // 🔴 消すのは出品用（lane: net）。ゴミ箱（{ID}/net/_deleted/）へ移すだけ＝戻せる
+        remove: function (fileName) {
+          return call("deleteProductPhoto", { masterId: masterId, lane: "net", fileName: fileName })
+            .then(function (r) { if (NET_CUR === masterId) netLoadPhotos(); return r; });
         }
       });
     });
@@ -3520,7 +3542,9 @@
     if (c.failed) t += "　入らなかった " + c.failed;
     if ($("cam-count")) $("cam-count").textContent = t;
     // 小さな絵の印（送信中は薄く・入らなかったものは赤枠）
-    if (BURST) BURST.items.forEach(function (it) { if (it.el) it.el.className = it.state; });
+    if (BURST) BURST.items.forEach(function (it) {
+      if (it.el) it.el.className = "ph-th " + it.state + (it.deleting ? " deleting" : "");
+    });
     var rb = $("cam-retry");
     if (rb) {
       rb.style.display = c.failed ? "" : "none";
@@ -3574,8 +3598,12 @@
     own.sending = true;
     it.state = "sending";
     burstShowCount();
-    own.upload(it.name, it.data)
-      .then(function () { it.state = "done"; it.data = ""; })   // 送れた分はメモリから外す
+    own.upload(it.name, it.data, it)
+      .then(function (r) {
+        it.state = "done"; it.data = "";   // 送れた分はメモリから外す
+        // 消すときは受け口が言った名前で消す（送った名前と同じはずだが、決め打ちしない）
+        it.saved = String((r && r.fileName) || it.name);
+      })
       .catch(function () { it.state = "failed"; })
       .finally(function () {
         own.sending = false;
@@ -3590,6 +3618,43 @@
     BURST.items.forEach(function (it) { if (it.state === "failed") it.state = "wait"; });
     burstShowCount();
     burstPump();
+  }
+
+  // 撮った写真を×で消す（2026-10-21・オーナー「撮った写真のうち間違えたもの消したい」）。
+  // 🔴 押し間違いに備えて確認を1回（この画面の流儀＝window.confirm）。
+  //    まだ送っていない・入らなかった写真＝手元から外すだけ（受け口には何も無い）。
+  //    送り終えた写真＝受け口で消す（cfg.remove・ゴミ箱へ移すだけ＝戻せる）。
+  //    送信中は消さない（×を出さない。送り終わってから消す）。
+  //    ⚠️ 消している最中は state を変えない（数え方の「送信中」に入ると、別の品を開けなくなる）。
+  function burstRemove(it) {
+    if (!BURST || BURST.items.indexOf(it) === -1) return;
+    if (it.state === "sending" || it.deleting) return;
+    if (!window.confirm("この写真を消しますか？")) return;
+    var own = BURST, cm = $("cam-msg");
+    var drop = function () {
+      var i = own.items.indexOf(it);
+      if (i !== -1) own.items.splice(i, 1);
+      if (it.el && it.el.parentNode) it.el.parentNode.removeChild(it.el);
+    };
+    if (it.state !== "done") {
+      drop();
+      if (BURST === own) burstShowCount();
+      if (cm) { cm.className = "msg"; cm.textContent = "1枚消しました。"; }
+      return;
+    }
+    if (typeof own.remove !== "function") return;
+    it.deleting = true;
+    burstShowCount();
+    if (cm) { cm.className = "msg"; cm.textContent = "消しています…"; }
+    own.remove(it.saved || it.name).then(function () {
+      drop();
+      if (cm) { cm.className = "msg"; cm.textContent = "1枚消しました。"; }
+    }).catch(function (e) {
+      if (cm) { cm.className = "msg err"; cm.textContent = "消せませんでした（" + ((e && e.message) || "理由不明") + "）"; }
+    }).finally(function () {
+      it.deleting = false;
+      if (BURST === own) burstShowCount();
+    });
   }
 
   function burstStopCamera() {
@@ -3671,7 +3736,7 @@
     } else {
       BURST.onDone = onDone;
     }
-    BURST.upload = cfg.upload; BURST.msgId = cfg.msgId;
+    BURST.upload = cfg.upload; BURST.remove = cfg.remove; BURST.msgId = cfg.msgId;
     BURST.isHere = cfg.isHere; BURST.fallback = cfg.fallback;
     burstThumbsRender();
     var own = BURST;
@@ -3744,12 +3809,22 @@
       th.width = 0; th.height = 0;
       cv.width = 0; cv.height = 0;   // 大きな canvas を手放す（iPhone はメモリが厳しい）
       BURST.seq += 1;
-      BURST.items.push({
+      // 枠＋×（×で消す・2026-10-21）
+      var wrap = document.createElement("div");
+      wrap.className = "ph-th wait";
+      wrap.appendChild(img);
+      var xb = document.createElement("button");
+      xb.type = "button"; xb.className = "ph-x"; xb.setAttribute("aria-label", "この写真を消す");
+      xb.innerHTML = "<span>×</span>";
+      wrap.appendChild(xb);
+      var item = {
         // ⚠️ 名前が重なると受け口が断る。連打でも重ならないよう通し番号を付ける
         name: "net-" + Date.now() + "-b" + BURST.seq + ".jpg",
-        data: data, state: "wait", el: img
-      });
-      if ($("cam-thumbs")) { $("cam-thumbs").appendChild(img); $("cam-thumbs").scrollLeft = $("cam-thumbs").scrollWidth; }
+        data: data, state: "wait", el: wrap, thumb: img.src
+      };
+      xb.addEventListener("click", function () { burstRemove(item); });
+      BURST.items.push(item);
+      if ($("cam-thumbs")) { $("cam-thumbs").appendChild(wrap); $("cam-thumbs").scrollLeft = $("cam-thumbs").scrollWidth; }
       // 撮れたことを目で分かるように一瞬暗くする
       v.classList.add("flash");
       setTimeout(function () { v.classList.remove("flash"); }, 120);
@@ -3780,8 +3855,89 @@
   //   次の品の {番号}/net/ へ黙って入る恐れがあった（受け口は「まだ確定前か」しか見ない）。
   //   quickreg の entryGen と同じ考え方＝呼ばれた時点の ND を閉じ込め、変わっていたら送らない。
   //   uploading … この品の写真を送っている本数（送り終わるまで「出品リストへ送る」を押せない）
-  function ndFresh() { return { id: "", photos: 0, uploading: 0 }; }
+  //   list … 入った写真（受け口が言った名前と小さな絵）。photos はその数（ndRender で揃える）
+  function ndFresh() { return { id: "", photos: 0, uploading: 0, list: [] }; }
   var ND = ndFresh();
+
+  // 入った写真の数と並び（×付き）を描く。🔴 枚数は並びから数える（別々に数えると食い違う）
+  function ndRender(own) {
+    own.photos = own.list.length;
+    if (ND !== own) return;
+    var c = $("nd-photo-count");
+    if (c) c.textContent = own.photos ? ("いまのところ " + own.photos + "枚 入っています") : "まだ1枚も入っていません";
+    var g = $("nd-photo-grid");
+    if (!g) return;
+    g.innerHTML = "";
+    own.list.forEach(function (ent) {
+      var w = document.createElement("div");
+      w.className = "ph-th";
+      var img = document.createElement("img");
+      img.alt = ""; if (ent.src) img.src = ent.src;
+      w.appendChild(img);
+      var xb = document.createElement("button");
+      xb.type = "button"; xb.className = "ph-x"; xb.setAttribute("aria-label", "この写真を消す");
+      xb.innerHTML = "<span>×</span>";
+      xb.addEventListener("click", function () { ndAskRemove(own, ent); });
+      w.appendChild(xb);
+      g.appendChild(w);
+    });
+  }
+
+  // 前の品の小さな絵（ライブラリから入れた分は blob: の URL）を手放す
+  function ndRelease(own) {
+    own.list.forEach(function (ent) {
+      if (ent.src && ent.src.indexOf("blob:") === 0) { try { URL.revokeObjectURL(ent.src); } catch (e) { /* 手放し済み */ } }
+    });
+  }
+
+  // 入った写真を1枚消す（2026-10-21・オーナー「撮った写真のうち間違えたもの消したい」）。
+  // 🔴 消せるのは「出品リストへ送る」を押す前だけ（受け口も assert_draft で断る）。
+  //    消し方は受け口の netDirectPhotoDelete＝ゴミ箱（{番号}/net/_deleted/）へ移すだけ＝戻せる。
+  //    消している間は own.uploading を上げる＝「出品リストへ送る」を押せない。
+  function ndDelete(own, name) {
+    if (ND !== own || !own.id) return Promise.reject(new Error("もう出品リストへ送ったので、ここでは消せません"));
+    var sb = $("nd-submit");
+    if (sb && sb.classList.contains("is-busy")) return Promise.reject(new Error("出品リストへ送っている最中です"));
+    own.uploading += 1;
+    ndSyncSubmit();
+    return call("netDirectPhotoDelete", { masterId: own.id, fileName: name }).then(function (r) {
+      for (var i = 0; i < own.list.length; i++) {
+        if (own.list[i].name === name) {
+          var ent = own.list.splice(i, 1)[0];
+          if (ent.src && ent.src.indexOf("blob:") === 0) { try { URL.revokeObjectURL(ent.src); } catch (e) { /* 手放し済み */ } }
+          break;
+        }
+      }
+      ndRender(own);
+      return r;
+    }).finally(function () {
+      own.uploading -= 1;
+      if (ND === own) ndSyncSubmit();
+    });
+  }
+
+  // 並びの×。🔴 押し間違いに備えて確認を1回（この画面の流儀＝window.confirm）
+  function ndAskRemove(own, ent) {
+    if (ND !== own) return;
+    if (!window.confirm("この写真を消しますか？")) return;
+    ndSay("nd-photo-msg", "", "消しています…");
+    ndDelete(own, ent.name).then(function () {
+      // 続けて撮るの手元の控えにも同じ写真があれば外す（閉じたあとの「N枚を入れました」と食い違わせない）
+      if (BURST && BURST.mid === own.id) {
+        for (var i = 0; i < BURST.items.length; i++) {
+          var it = BURST.items[i];
+          if (it.state === "done" && (it.saved || it.name) === ent.name) {
+            BURST.items.splice(i, 1);
+            if (it.el && it.el.parentNode) it.el.parentNode.removeChild(it.el);
+            break;
+          }
+        }
+      }
+      ndSay("nd-photo-msg", "ok", "1枚消しました。");
+    }).catch(function (e) {
+      ndSay("nd-photo-msg", "err", "消せませんでした（" + ((e && e.message) || "理由不明") + "）");
+    });
+  }
 
   // 写真の送信中は「出品リストへ送る」を押せなくする（送り終わる前に確定すると、写真が欠ける）
   function ndSyncSubmit() {
@@ -3804,6 +3960,7 @@
   }
 
   function ndReset() {
+    ndRelease(ND);
     ND = ndFresh();   // 世代が変わる＝前の品の送りかけの写真はもう送らない
     ndSyncSubmit();
     if (!$("nd-step1")) return;
@@ -3811,7 +3968,7 @@
     $("nd-start").style.display = "";
     ndSay("nd-msg", "", "");
     ndSay("nd-photo-msg", "", "");
-    $("nd-photo-count").textContent = "まだ1枚も入っていません";
+    ndRender(ND);
     $("nd-files").value = "";
     $("nd-files-lib").value = "";
     $("nd-dim").value = "";
@@ -3868,13 +4025,10 @@
       if (i >= files.length) {
         own.uploading -= 1;
         ndSyncSubmit();
-        own.photos += done;
+        ndRender(own);
         ndSay("nd-photo-msg", failed ? "err" : "ok",
           failed ? (done + "枚を入れました（" + failed + "枚は入りませんでした）。")
                  : (done + "枚を入れました。"));
-        $("nd-photo-count").textContent = own.photos
-          ? ("いまのところ " + own.photos + "枚 入っています")
-          : "まだ1枚も入っていません";
         // 🔴 両方とも空にする。同じ写真を選び直したとき change が出ないため
         $("nd-files").value = "";
         $("nd-files-lib").value = "";
@@ -3883,11 +4037,18 @@
       var fr = new FileReader();
       fr.onload = function () {
         if (ND !== own) { next(i); return; }   // 読んでいる間に品が変わった＝送らない
+        var fn = "net-" + Date.now() + "-" + i + nameExt(files[i].name), file = files[i];
         call("netDirectPhoto", {
           masterId: mid,
-          fileName: "net-" + Date.now() + "-" + i + nameExt(files[i].name),
+          fileName: fn,
           dataBase64: String(fr.result || "")
-        }).then(function () { done += 1; })
+        }).then(function (r) {
+          done += 1;
+          // 並びに出す（×で消せるように、受け口が言った名前を持つ）
+          var src = "";
+          try { src = URL.createObjectURL(file); } catch (e) { /* 絵が出なくても×は使える */ }
+          own.list.push({ name: String((r && r.fileName) || fn), src: src });
+        })
           .catch(function () { failed += 1; })
           .finally(function () {
             if (ND === own) ndSay("nd-photo-msg", "", "送っています… " + (done + failed) + "/" + files.length);
@@ -3932,6 +4093,8 @@
       // 🔴 どこまで進んだかは**受け口が言った状態**をそのまま出す（画面で言い切らない）
       ndSay("nd-msg", "ok", String((r && r.message) || (id + " を出品リストへ入れました。")));
       // 続けて次の品へ進めるように、番号を空にして最初の状態へ戻す
+      // 🔴 送った後の写真は消さない＝並び（×）もここで片づける
+      ndRelease(own);
       ND = ndFresh();
       $("nd-step1").style.display = "none";
       $("nd-start").style.display = "";
@@ -3939,7 +4102,7 @@
       $("nd-dim").value = ""; $("nd-ship").value = ""; $("nd-memo").value = ""; $("nd-dest").value = "";
       if ($("nd-name")) $("nd-name").value = "";
       if ($("nd-price")) $("nd-price").value = "";
-      $("nd-photo-count").textContent = "まだ1枚も入っていません";
+      ndRender(ND);
       ndSay("nd-photo-msg", "", "");
     }).catch(function (e) {
       if (ND !== own) return;
@@ -3961,20 +4124,22 @@
     burstOpen(mid, null, {
       msgId: "nd-photo-msg", fallback: "写真を撮る", name: mid,
       isHere: function () { return ND === own; },
-      upload: function (fileName, data) {
+      upload: function (fileName, data, it) {
         own.uploading += 1;
         if (ND === own) ndSyncSubmit();
         return call("netDirectPhoto", { masterId: mid, fileName: fileName, dataBase64: data })
           .then(function (r) {
-            own.photos += 1;
-            if (ND === own) $("nd-photo-count").textContent = "いまのところ " + own.photos + "枚 入っています";
+            own.list.push({ name: String((r && r.fileName) || fileName), src: (it && it.thumb) || "" });
+            ndRender(own);
             return r;
           })
           .finally(function () {
             own.uploading -= 1;
             if (ND === own) ndSyncSubmit();
           });
-      }
+      },
+      // ×で消す＝並びの×と同じ口（確定前だけ・ゴミ箱へ移すだけ）
+      remove: function (fileName) { return ndDelete(own, fileName); }
     });
   }
 
