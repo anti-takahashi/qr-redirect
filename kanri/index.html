@@ -524,6 +524,9 @@
           <span>③ 送るときの大きさ</span>
           <select id="nd-ship" style="min-height:56px;font-size:16px;">
             <option value="">選んでください</option>
+            <!-- 小さく薄い物（バッジ・古銭など）。出品CSVは配送方法ネコポス・落札者負担になり、
+                 説明に「発送サイズは問い合わせ下さい。」を出さない（listing_tools の配送区分「メール便」）。 -->
+            <option value="ネコポス">ネコポス（小さく薄い物）</option>
             <option value="60">60サイズ</option>
             <option value="80">80サイズ</option>
             <option value="100">100サイズ</option>
